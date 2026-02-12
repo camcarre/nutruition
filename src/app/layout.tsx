@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { MobileNav } from '@/components/layout/MobileNav'
+import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -38,6 +39,7 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body className={`${inter.className} bg-white text-gray-800`}>
+        <ServiceWorkerRegister />
         <div className="min-h-screen max-w-mobile mx-auto bg-white">
           <main className="pb-20">
             {children}
