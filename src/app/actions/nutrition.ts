@@ -233,6 +233,20 @@ export async function saveMeal(userId: string, mealData: any) {
   }
 }
 
+export async function deleteMeal(mealId: string) {
+  try {
+    await prisma.meal.delete({
+      where: { id: mealId }
+    })
+    revalidatePath('/calendar')
+    revalidatePath('/meal-builder')
+    return true
+  } catch (error) {
+    console.error('Error in deleteMeal:', error)
+    return false
+  }
+}
+
 // --- Favorites ---
 
 export async function getFavoriteMeals(userId: string) {

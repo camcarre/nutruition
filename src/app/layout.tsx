@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister'
+import { SyncListener } from '@/components/pwa/SyncListener'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -40,6 +41,7 @@ export default function RootLayout({
     <html lang="fr">
       <body className={`${inter.className} bg-white text-gray-800`}>
         <ServiceWorkerRegister />
+        <SyncListener />
         <div className="min-h-screen max-w-mobile mx-auto bg-white">
           <main className="pb-20">
             {children}

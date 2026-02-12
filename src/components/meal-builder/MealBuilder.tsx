@@ -6,11 +6,11 @@ import { Header } from '@/components/layout/Header'
 import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
 import { 
   getFavoriteMeals, 
-  saveMeal as saveMealToDB, 
-  addFavoriteMeal as addFavoriteToDB,
-  deleteFavoriteMeal as deleteFavoriteFromDB,
   getFoods
 } from '@/app/actions/nutrition'
+import { addMealWithSync, addFavoriteWithSync, deleteFavoriteWithSync } from '@/lib/syncService'
+import { getOfflineFavorites, saveOfflineFavorite, getOfflineMeals, saveOfflineMeal } from '@/lib/offlineDb'
+import { deleteFavoriteMeal as deleteFavoriteFromDB, getMealsByDate } from '@/app/actions/nutrition'
 import { 
   format, 
   addDays, 
@@ -99,6 +99,9 @@ export function MealBuilder() {
    const [showFoodSearch, setShowFoodSearch] = useState(false)
    const [availableFoods, setAvailableFoods] = useState<Food[]>([])
    const [favoriteMeals, setFavoriteMeals] = useState<FavoriteMeal[]>([])
+   const [recentMeals, setRecentMeals] = useState<any[]>([])
+   const [todayTotalCalories, setTodayTotalCalories] = useState(0)
+   const [isLoading, setIsLoading] = useState(true)
    const [isLoadingFavorites, setIsLoadingFavorites] = useState(false)
    const [showFavorites, setShowFavorites] = useState(false)
    const [mealName, setMealName] = useState('')
@@ -121,38 +124,151 @@ export function MealBuilder() {
      async function fetchData() {
        if (!user?.id) return
        
+       setIsLoading(true)
        setIsLoadingFavorites(true)
-       try {
-         const [favs, dbFoods] = await Promise.all([
-           getFavoriteMeals(user.id),
-           getFoods(user.id)
+      try {
+        // Reset local state before fetching
+        setTodayTotalCalories(0)
+        setRecentMeals([])
+
+        // 1. Tenter de charger depuis IndexedDB d'abord (cache/offline)
+         const [offlineFavs, offlineMeals] = await Promise.all([
+           getOfflineFavorites(),
+           getOfflineMeals()
          ])
-         
-         const mappedFavs: FavoriteMeal[] = favs.map((f: any) => ({
-           id: f.id,
-           name: f.name,
-           mealType: f.mealType as any,
-           totalCalories: f.totalCalories,
-           totalProtein: f.totalProtein,
-           totalCarbs: f.totalCarbs,
-           totalFat: f.totalFat,
-           foods: f.items.map((item: any) => ({
-             ...item.food,
-             quantityG: item.quantityG
+
+         if (offlineFavs.length > 0) {
+           const mappedOfflineFavs: FavoriteMeal[] = offlineFavs.map((f: any) => ({
+             id: f.id,
+             name: f.name,
+             mealType: f.mealType as any,
+             totalCalories: f.totalCalories,
+             totalProtein: f.totalProtein,
+             totalCarbs: f.totalCarbs,
+             totalFat: f.totalFat,
+             foods: f.items.map((item: any) => ({
+               ...item.food,
+               quantityG: item.quantityG
+             }))
            }))
-         }))
-         
-         setFavoriteMeals(mappedFavs)
-         setAvailableFoods(dbFoods as any)
-       } catch (error) {
+           setFavoriteMeals(mappedOfflineFavs)
+         }
+
+         if (offlineMeals.length > 0) {
+           // Filtrer les repas d'aujourd'hui pour le total des calories
+           const todayMeals = offlineMeals.filter((m: any) => m.date === selectedDate)
+           const todayCal = todayMeals.reduce((acc: number, m: any) => acc + m.totalCalories, 0)
+           setTodayTotalCalories(todayCal)
+
+           // 10 derniers repas
+           const sortedMeals = [...offlineMeals].sort((a: any, b: any) => 
+             new Date(b.date).getTime() - new Date(a.date).getTime()
+           ).slice(0, 10)
+           setRecentMeals(sortedMeals)
+         }
+
+         // 2. Charger depuis Supabase si en ligne
+         if (typeof navigator !== 'undefined' && navigator.onLine) {
+           const [favs, dbFoods, dayMeals] = await Promise.all([
+             getFavoriteMeals(user.id),
+             getFoods(user.id),
+             getMealsByDate(user.id, selectedDate)
+           ])
+           
+           const mappedFavs: FavoriteMeal[] = favs.map((f: any) => ({
+             id: f.id,
+             name: f.name,
+             mealType: f.mealType as any,
+             totalCalories: f.totalCalories,
+             totalProtein: f.totalProtein,
+             totalCarbs: f.totalCarbs,
+             totalFat: f.totalFat,
+             foods: f.items.map((item: any) => ({
+               ...item.food,
+               quantityG: item.quantityG
+             }))
+           }))
+           
+           setFavoriteMeals(mappedFavs)
+          setAvailableFoods(dbFoods as any)
+
+          // Mettre à jour le cache local (Favoris)
+           for (const fav of mappedFavs) {
+             await saveOfflineFavorite({
+               id: fav.id,
+               name: fav.name,
+               mealType: fav.mealType,
+               items: fav.foods.map(food => ({
+                 food: {
+                   id: food.id,
+                   name: food.name,
+                   calories: food.calories,
+                   protein: food.protein,
+                   carbs: food.carbs,
+                   fat: food.fat,
+                   servingSizeG: food.servingSizeG
+                 },
+                 quantityG: food.quantityG
+               })),
+               totalCalories: fav.totalCalories,
+               totalProtein: fav.totalProtein,
+               totalCarbs: fav.totalCarbs,
+               totalFat: fav.totalFat,
+               synced: true
+             })
+           }
+
+           // Mettre à jour le cache local (Repas d'aujourd'hui)
+          for (const meal of dayMeals) {
+            await saveOfflineMeal({
+              id: meal.id,
+              name: meal.mealType,
+              mealType: meal.mealType,
+              date: format(new Date(meal.date), 'yyyy-MM-dd'),
+              items: meal.items,
+              totalCalories: meal.totalCalories,
+              totalProtein: meal.totalProtein,
+              totalCarbs: meal.totalCarbs,
+              totalFat: meal.totalFat,
+              synced: true
+            })
+          }
+
+          // Recharger tout depuis IndexedDB pour avoir la version fusionnée (offline + online)
+          const finalOfflineMeals = await getOfflineMeals()
+          
+          // Calculer les calories d'aujourd'hui
+          const todayMeals = finalOfflineMeals.filter((m: any) => m.date === selectedDate)
+          const todayCal = todayMeals.reduce((acc: number, m: any) => acc + m.totalCalories, 0)
+          setTodayTotalCalories(todayCal)
+
+          // 10 derniers repas
+          const sortedMeals = [...finalOfflineMeals].sort((a: any, b: any) => 
+            new Date(b.date).getTime() - new Date(a.date).getTime()
+          ).slice(0, 10)
+          setRecentMeals(sortedMeals)
+        }
+      } catch (error) {
          console.error('Error fetching data:', error)
        } finally {
+         setIsLoading(false)
          setIsLoadingFavorites(false)
        }
      }
      
      fetchData()
-   }, [user?.id])
+
+    // Écouter la fin de la synchronisation pour rafraîchir les données
+    const handleSyncComplete = () => {
+      console.log('Sync complete detected in MealBuilder, refreshing...')
+      fetchData()
+    }
+    window.addEventListener('nutruition:sync-complete', handleSyncComplete)
+
+    return () => {
+      window.removeEventListener('nutruition:sync-complete', handleSyncComplete)
+    }
+  }, [user?.id, selectedDate])
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [viewDate, setViewDate] = useState(new Date())
 
@@ -232,35 +348,45 @@ export function MealBuilder() {
     setIsSaving(true)
     try {
       const favoriteData = {
-        name: mealName.trim(),
+        name: mealName,
         mealType,
-        foods: foods.map(f => ({ id: f.id, quantityG: f.quantityG })),
+        items: foods.map(f => ({
+          id: f.id,
+          quantityG: f.quantityG
+        })),
         totalCalories: Math.round(totalNutrients.calories),
         totalProtein: Math.round(totalNutrients.protein * 10) / 10,
         totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
         totalFat: Math.round(totalNutrients.fat * 10) / 10
       }
 
-      const newFavorite = await addFavoriteToDB(user.id, favoriteData)
-      
-      if (newFavorite) {
-        // Refresh favorites list
-        const favs = await getFavoriteMeals(user.id)
-        const mappedFavs: FavoriteMeal[] = favs.map((f: any) => ({
-          id: f.id,
-          name: f.name,
-          mealType: f.mealType as any,
-          totalCalories: f.totalCalories,
-          totalProtein: f.totalProtein,
-          totalCarbs: f.totalCarbs,
-          totalFat: f.totalFat,
-          foods: f.items.map((item: any) => ({
-            ...item.food,
-            quantityG: item.quantityG
-          }))
+      await addFavoriteWithSync({
+        id: `${user.id}_fav_${Date.now()}`,
+        name: mealName,
+        mealType,
+        items: favoriteData.items,
+        totalCalories: favoriteData.totalCalories,
+        totalProtein: favoriteData.totalProtein,
+        totalCarbs: favoriteData.totalCarbs,
+        totalFat: favoriteData.totalFat,
+        synced: false
+      }, user.id)
+
+      const favs = await getFavoriteMeals(user.id)
+      const mappedFavs: FavoriteMeal[] = favs.map((f: any) => ({
+        id: f.id,
+        name: f.name,
+        mealType: f.mealType as any,
+        totalCalories: f.totalCalories,
+        totalProtein: f.totalProtein,
+        totalCarbs: f.totalCarbs,
+        totalFat: f.totalFat,
+        foods: f.items.map((item: any) => ({
+          ...item.food,
+          quantityG: item.quantityG
         }))
-        setFavoriteMeals(mappedFavs)
-      }
+      }))
+      setFavoriteMeals(mappedFavs)
 
       setMealName('')
       setShowSaveModal(false)
@@ -292,10 +418,8 @@ export function MealBuilder() {
     if (!user?.id) return
 
     try {
-      const success = await deleteFavoriteFromDB(id)
-      if (success) {
-        setFavoriteMeals(prev => prev.filter(meal => meal.id !== id))
-      }
+      await deleteFavoriteWithSync(id, user.id)
+      setFavoriteMeals(prev => prev.filter(meal => meal.id !== id))
     } catch (error) {
       console.error('Error deleting favorite:', error)
     }
@@ -307,9 +431,11 @@ export function MealBuilder() {
     setIsSaving(true)
     try {
       const mealData = {
-        date: selectedDate,
+        id: `${user.id}_meal_${Date.now()}`,
+        name: mealTypeLabels[mealType].label,
         mealType,
-        foods: foods.map(f => ({
+        date: selectedDate,
+        items: foods.map(f => ({
           id: f.id,
           quantityG: f.quantityG,
           totalCalories: f.totalCalories,
@@ -320,17 +446,25 @@ export function MealBuilder() {
         totalCalories: Math.round(totalNutrients.calories),
         totalProtein: Math.round(totalNutrients.protein * 10) / 10,
         totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
-        totalFat: Math.round(totalNutrients.fat * 10) / 10
+        totalFat: Math.round(totalNutrients.fat * 10) / 10,
+        synced: false
       }
 
-      const savedMeal = await saveMealToDB(user.id, mealData)
-      if (savedMeal) {
-        // Clear foods after saving to calendar
-        setFoods([])
-        // Show success message or redirect? 
-        // For now just clear and maybe a toast if available
-        alert('Repas enregistré dans le calendrier !')
+      await addMealWithSync(mealData)
+      
+      // Mettre à jour les repas récents localement
+      setRecentMeals(prev => {
+        const updated = [mealData, ...prev]
+        return updated.slice(0, 10)
+      })
+
+      // Mettre à jour les calories du jour si c'est la date sélectionnée
+      if (mealData.date === selectedDate) {
+        setTodayTotalCalories(prev => prev + mealData.totalCalories)
       }
+
+      setFoods([])
+      alert('Repas enregistré localement (sera synchronisé une fois en ligne) !')
     } catch (error) {
       console.error('Error saving meal:', error)
     } finally {
@@ -363,7 +497,7 @@ export function MealBuilder() {
     food.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const consumedCalories = totalNutrients.calories
+  const consumedCalories = todayTotalCalories + totalNutrients.calories
   const targetCalories = typeof tdeeResult?.targetCalories === 'number' ? tdeeResult.targetCalories : 2560
   const mealDistribution = tdeeResult?.mealDistribution
   const computedMealTargetCalories =
@@ -422,41 +556,67 @@ export function MealBuilder() {
       </div>
 
       {/* TDEE Purple Card */}
-      <div className="bg-indigo-600 rounded-[2rem] p-6 text-white shadow-lg shadow-indigo-200">
-        <div className="flex justify-between items-start mb-6">
-          <div className="flex items-center gap-2">
-            <span className="text-orange-400">🔥</span>
-            <span className="text-xs font-bold uppercase tracking-wider opacity-80">Objectif TDEE</span>
+      {isLoading ? (
+        <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 animate-pulse">
+          <div className="flex justify-between items-start mb-6">
+            <div className="w-24 h-4 bg-gray-100 rounded-full" />
+            <div className="w-20 h-6 bg-gray-100 rounded-full" />
           </div>
-          <span className="bg-indigo-500/50 text-xs px-3 py-1 rounded-full backdrop-blur-sm">
-            {mealTypeLabels[mealType].label}
-          </span>
+          <div className="flex justify-between items-end mb-6">
+            <div className="space-y-2">
+              <div className="w-16 h-8 bg-gray-100 rounded-lg" />
+              <div className="w-24 h-2 bg-gray-100 rounded-full" />
+            </div>
+            <div className="space-y-2 text-right">
+              <div className="w-16 h-8 bg-gray-100 rounded-lg ml-auto" />
+              <div className="w-24 h-2 bg-gray-100 rounded-full" />
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="flex justify-between">
+              <div className="w-20 h-2 bg-gray-100 rounded-full" />
+              <div className="w-20 h-2 bg-gray-100 rounded-full" />
+            </div>
+            <div className="w-full h-2 bg-gray-100 rounded-full" />
+          </div>
         </div>
+      ) : (
+        <div className="bg-indigo-600 rounded-[2rem] p-6 text-white shadow-lg shadow-indigo-200 animate-in fade-in duration-500">
+          <div className="flex justify-between items-start mb-6">
+            <div className="flex items-center gap-2">
+              <span className="text-orange-400">🔥</span>
+              <span className="text-xs font-bold uppercase tracking-wider opacity-80">Objectif TDEE</span>
+            </div>
+            <span className="bg-indigo-500/50 text-xs px-3 py-1 rounded-full backdrop-blur-sm">
+              {mealTypeLabels[mealType].label}
+            </span>
+          </div>
 
-        <div className="flex justify-between items-end mb-6">
-          <div>
-            <div className="text-4xl font-bold">{targetCalories}</div>
-            <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Calories journalières</div>
+          <div className="flex justify-between items-end mb-6">
+            <div>
+              <div className="text-4xl font-bold">{targetCalories}</div>
+              <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Calories journalières</div>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl font-bold">{mealTargetCalories}</div>
+              <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Cible par repas</div>
+            </div>
           </div>
-          <div className="text-right">
-            <div className="text-3xl font-bold">{mealTargetCalories}</div>
-            <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Cible par repas</div>
-          </div>
-        </div>
 
-        <div className="space-y-2">
-          <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider">
-            <span>{consumedCalories} kcal consommés</span>
-            <span>Reste: {remainingCalories} kcal</span>
-          </div>
-          <div className="h-2 bg-indigo-800/50 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-white rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${progressPercentage}%` }}
-            />
+          <div className="space-y-2">
+            <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider">
+              <span>{consumedCalories} kcal consommés</span>
+              <span>Reste: {remainingCalories} kcal</span>
+            </div>
+            <div className="h-2 bg-indigo-800/50 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-white rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${progressPercentage}%` }}
+              />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Meal Tabs Horizontal Scroll */}
       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
@@ -492,8 +652,58 @@ export function MealBuilder() {
             </svg>
           </button>
       </div>
-
-      {/* Foods List Section */}
+      {/* 10 Last Meals Section */}
+      {isLoading ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 px-1">
+            <div className="w-5 h-5 bg-gray-100 rounded-full animate-pulse" />
+            <div className="w-32 h-4 bg-gray-100 rounded-full animate-pulse" />
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4 min-w-[160px] shadow-sm flex flex-col gap-3 animate-pulse">
+                <div className="w-8 h-8 bg-gray-100 rounded-lg" />
+                <div className="space-y-2">
+                  <div className="w-20 h-3 bg-gray-100 rounded-full" />
+                  <div className="w-12 h-2 bg-gray-100 rounded-full" />
+                </div>
+                <div className="w-10 h-2 bg-gray-100 rounded-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : recentMeals.length > 0 && (
+        <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-500">
+          <div className="flex justify-between items-center px-1">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🕒</span>
+              <h3 className="font-bold text-gray-900">10 derniers repas</h3>
+            </div>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
+            {recentMeals.map((meal) => (
+              <div 
+                key={meal.id}
+                className="bg-white border border-gray-100 rounded-2xl p-4 min-w-[160px] shadow-sm flex flex-col gap-2 hover:border-indigo-100 transition-colors"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-xl">{mealTypeLabels[meal.mealType as keyof typeof mealTypeLabels]?.icon || '🍽️'}</span>
+                  {!meal.synced && <span className="text-[8px] bg-orange-100 text-orange-500 px-1.5 py-0.5 rounded-full font-bold uppercase">Offline</span>}
+                </div>
+                <div>
+                  <div className="font-bold text-gray-800 text-sm truncate">{mealTypeLabels[meal.mealType as keyof typeof mealTypeLabels]?.label || meal.name}</div>
+                  <div className="text-[10px] text-gray-400 font-bold">{meal.totalCalories} kcal</div>
+                </div>
+                <div className="text-[9px] text-gray-300 font-medium">
+                  {format(parseISO(meal.date), 'd MMM', { locale: fr })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+ 
+       {/* Foods List Section */}
       <div className="space-y-4">
         <div className="flex justify-between items-center px-1">
           <h3 className="text-lg font-bold text-gray-900">Aliments</h3>
@@ -502,8 +712,8 @@ export function MealBuilder() {
           </span>
         </div>
 
-        {foods.length === 0 ? (
-          <div className="border-2 border-dashed border-gray-100 rounded-[2rem] p-12 flex flex-col items-center justify-center text-center space-y-4 bg-gray-50/30">
+                {foods.length === 0 ? (
+          <div className="border-2 border-dashed border-gray-100 rounded-[2rem] p-12 flex flex-col items-center justify-center text-center space-y-4 bg-gray-50/30 animate-in zoom-in-95 duration-500">
             <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center">
               <span className="text-4xl text-indigo-200">🍽️</span>
             </div>
@@ -523,9 +733,9 @@ export function MealBuilder() {
             </button>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 animate-in slide-in-from-bottom-4 duration-500">
             {foods.map((food) => (
-              <div key={food.id} className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-2xl shadow-sm">
+              <div key={food.id} className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-2xl shadow-sm hover:border-indigo-100 transition-all">
                 <div className="flex-1">
                   <div className="font-bold text-gray-800">{food.name}</div>
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">
