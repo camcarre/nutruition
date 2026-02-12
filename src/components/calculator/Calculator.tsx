@@ -9,7 +9,7 @@ type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active' | 'very_activ
 type Goal = 'lose' | 'maintain' | 'gain' | ''
 type MealTiming = 'balanced' | 'morning_heavy' | 'evening_heavy' | ''
 type WorkoutSchedule = 'none' | 'morning' | 'evening' | 'both' | ''
-type SnackCount = '0' | '1' | '2' | '3' | ''
+type SnackCount = 'yes' | 'no' | ''
 
 interface TDEEForm {
   age: string
@@ -117,10 +117,8 @@ const MEAL_TIMING_OPTIONS = [
 ] as const
 
 const SNACK_COUNT_OPTIONS = [
-  { value: '0', label: 'Aucune' },
-  { value: '1', label: '1 collation' },
-  { value: '2', label: '2 collations' },
-  { value: '3', label: '3 collations' },
+  { value: 'no', label: 'Non' },
+  { value: 'yes', label: 'Oui' },
 ] as const
 
 const WORKOUT_SCHEDULE_OPTIONS = [
@@ -139,7 +137,7 @@ const DEFAULT_FORM: TDEEForm = {
   goal: 'lose',
   mealTiming: 'balanced',
   workoutSchedule: 'none',
-  snackCount: '1',
+  snackCount: 'yes',
 }
 
 export function Calculator() {
@@ -281,19 +279,13 @@ export function Calculator() {
       }
     }
 
-    // Adjust snacks based on count
-    const snackCount = Number(form.snackCount)
-    if (snackCount === 0) {
+    // Adjust snacks based on preference
+    if (form.snackCount === 'no') {
       mealDistribution.breakfast += mealDistribution.snacks
       mealDistribution.snacks = 0
-    } else if (snackCount === 1) {
+    } else {
+      // Default 'yes' to 1 snack (10%)
       mealDistribution.snacks = Math.round(targetCalories * 0.1)
-    } else if (snackCount === 2) {
-      mealDistribution.snacks = Math.round(targetCalories * 0.15)
-      mealDistribution.dinner -= Math.round(targetCalories * 0.05)
-    } else if (snackCount === 3) {
-      mealDistribution.snacks = Math.round(targetCalories * 0.2)
-      mealDistribution.dinner -= Math.round(targetCalories * 0.1)
     }
 
     // Workout timing recommendation
@@ -492,7 +484,7 @@ export function Calculator() {
             </div>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-gray-400">
-                Fréquence des collations
+                Prendre des collations ?
               </div>
               <div className="mt-1 truncate text-lg font-extrabold text-gray-900">
                 {SNACK_COUNT_OPTIONS.find((o) => o.value === form.snackCount)?.label ??
@@ -503,7 +495,7 @@ export function Calculator() {
               value={form.snackCount}
               onChange={(e) => updateForm('snackCount', e.target.value as SnackCount)}
               className="absolute inset-0 cursor-pointer opacity-0"
-              aria-label="Fréquence des collations"
+              aria-label="Prendre des collations ?"
             >
               <option value="">Sélectionner</option>
               {SNACK_COUNT_OPTIONS.map((o) => (
