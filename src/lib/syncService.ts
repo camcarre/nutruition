@@ -15,6 +15,7 @@ import {
   deleteMeal,
   updateUserCalories
 } from '@/app/actions/nutrition';
+import { setIsland, showIsland } from './uiStore';
 
 export async function addMealWithSync(meal: OfflineMeal) {
   // 1. Sauvegarder localement immédiatement
@@ -196,11 +197,14 @@ export async function syncOfflineData() {
   if (queue.length === 0) return;
   
   isSyncing = true;
+  setIsland({ status: 'syncing', message: `Synchronisation...`, visible: true });
   console.log(`Tentative de synchronisation de ${queue.length} actions...`);
   
   let successCount = 0;
+  let errorCount = 0;
   for (const action of queue) {
     try {
+      // ... existing switch case logic ...
       switch (action.type) {
         case 'ADD_MEAL':
           await saveMeal(action.data.userId, action.data.mealData);
@@ -219,19 +223,28 @@ export async function syncOfflineData() {
           break;
       }
       
-      // Supprimer de la file seulement si réussi
       if (action.id !== undefined) {
         await removeFromSyncQueue(action.id);
         successCount++;
       }
     } catch (error) {
       console.error('Erreur lors de la synchro d\'une action:', error);
-      // On s'arrête si erreur réseau, on réessaiera plus tard
+      errorCount++;
       if (!navigator.onLine) break;
     }
   }
   
   isSyncing = false;
+  if (successCount > 0) {
+    const message = errorCount > 0 
+      ? `${successCount} synchronisés, ${errorCount} erreurs`
+      : `${successCount} action(s) synchronisée(s)`;
+    showIsland(message, errorCount > 0 ? 'error' : 'success', 3000);
+  } else if (errorCount > 0) {
+    showIsland(`Échec de la synchronisation (${errorCount})`, 'error', 3000);
+  } else {
+    setIsland({ visible: false });
+  }
   console.log(`Synchronisation terminée. ${successCount}/${queue.length} actions réussies.`);
   
   // Notifier l'UI que les données ont changé

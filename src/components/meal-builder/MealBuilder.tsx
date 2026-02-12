@@ -4,6 +4,7 @@ import { useState, useEffect, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
+import { showIsland } from '@/lib/uiStore'
 import { 
   getFavoriteMeals, 
   getFoods
@@ -122,10 +123,15 @@ export function MealBuilder() {
    // Fetch data from DB
    useEffect(() => {
      async function fetchData() {
-       if (!user?.id) return
-       
-       setIsLoading(true)
-       setIsLoadingFavorites(true)
+      setIsLoading(true)
+      setIsLoadingFavorites(true)
+      
+      if (!user?.id) {
+        setIsLoading(false)
+        setIsLoadingFavorites(false)
+        return
+      }
+      
       try {
         // Reset local state before fetching
         setTodayTotalCalories(0)
@@ -305,10 +311,15 @@ export function MealBuilder() {
     setFoods(prev => [...prev, newFood])
     setShowFoodSearch(false)
     setSearchQuery('')
+    showIsland(`${food.name} ajouté`, 'success', 2000)
   }
 
   const removeFood = (id: string) => {
+    const foodToRemove = foods.find(f => f.id === id)
     setFoods(prev => prev.filter(food => food.id !== id))
+    if (foodToRemove) {
+      showIsland(`${foodToRemove.name} retiré`, 'success', 2000)
+    }
   }
 
   const updateQuantity = (id: string, newQuantity: number) => {
@@ -390,6 +401,7 @@ export function MealBuilder() {
 
       setMealName('')
       setShowSaveModal(false)
+      showIsland('Ajouté aux favoris !', 'success', 3000)
     } catch (error) {
       console.error('Error saving favorite:', error)
     } finally {
@@ -420,6 +432,7 @@ export function MealBuilder() {
     try {
       await deleteFavoriteWithSync(id, user.id)
       setFavoriteMeals(prev => prev.filter(meal => meal.id !== id))
+      showIsland('Favori supprimé', 'success', 2000)
     } catch (error) {
       console.error('Error deleting favorite:', error)
     }
@@ -464,7 +477,7 @@ export function MealBuilder() {
       }
 
       setFoods([])
-      alert('Repas enregistré localement (sera synchronisé une fois en ligne) !')
+      showIsland('Repas enregistré !', 'success', 3000)
     } catch (error) {
       console.error('Error saving meal:', error)
     } finally {

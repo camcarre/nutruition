@@ -5,6 +5,7 @@ import { MobileNav } from '@/components/layout/MobileNav'
 import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister'
 import { SyncListener } from '@/components/pwa/SyncListener'
 import { SplashScreen } from '@/components/layout/SplashScreen'
+import { DynamicIsland } from '@/components/layout/DynamicIsland'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -42,6 +43,7 @@ export default function RootLayout({
     <html lang="fr">
       <body className={`${inter.className} bg-white text-gray-800`}>
         <SplashScreen />
+        <DynamicIsland />
         <ServiceWorkerRegister />
         <SyncListener />
         <div className="min-h-screen max-w-mobile mx-auto bg-white">

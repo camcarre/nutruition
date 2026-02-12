@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getOrCreateUser } from '@/app/actions/nutrition'
+import { showIsland } from '@/lib/uiStore'
 
 export function RegisterForm() {
   const router = useRouter()
@@ -35,11 +36,13 @@ export function RegisterForm() {
           photoUrl: user.photoUrl 
         }))
         window.dispatchEvent(new Event('nutruition:user'))
+        showIsland('Compte créé !', 'success', 3000)
         router.push('/')
       }
     } catch (error) {
       console.error('Registration error:', error)
       setError('Une erreur est survenue lors de l’inscription')
+      showIsland('Erreur d’inscription', 'error', 3000)
     } finally {
       setIsLoading(false)
     }

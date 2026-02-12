@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getOrCreateUser } from '@/app/actions/nutrition'
+import { showIsland } from '@/lib/uiStore'
 
 export function LoginForm() {
   const router = useRouter()
@@ -26,10 +27,12 @@ export function LoginForm() {
           photoUrl: user.photoUrl 
         }))
         window.dispatchEvent(new Event('nutruition:user'))
+        showIsland(`Bon retour !`, 'success', 3000)
         router.push('/')
       }
     } catch (error) {
       console.error('Login error:', error)
+      showIsland('Erreur de connexion', 'error', 3000)
     } finally {
       setIsLoading(false)
     }

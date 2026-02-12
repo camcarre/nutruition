@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useSyncExternalStore } from 'react'
 import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
+import { showIsland } from '@/lib/uiStore'
 import { updateUserCalories } from '@/app/actions/nutrition'
 
 type Sex = 'M' | 'F' | ''
@@ -313,6 +314,7 @@ export function Calculator() {
 
     setResult(resultData)
     localStorage.setItem('tdeeResult', JSON.stringify(resultData))
+    showIsland('Calcul terminé !', 'success', 2000)
 
     // Sync with DB if user is logged in
     if (user?.id) {
