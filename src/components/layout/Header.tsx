@@ -36,8 +36,9 @@ export function Header() {
               <span>{userInitial}</span>
             )}
           </div>
-          <h1 className="text-2xl font-bold text-[#1a1c2e] tracking-tight">
-            utruition
+          <h1 className="text-2xl font-black text-[#1a1c2e] tracking-tighter flex items-center">
+            <span className="text-indigo-600">u</span>truition
+            <span className="ml-1 w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
           </h1>
         </button>
 

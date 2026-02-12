@@ -58,15 +58,15 @@ export function MobileNav() {
                 className="flex flex-col items-center gap-1"
               >
                 <span
-                  className={`grid place-items-center h-11 w-11 rounded-2xl transition-colors ${
-                    isActive ? 'bg-indigo-50 text-indigo-600' : 'text-gray-400'
+                  className={`grid place-items-center h-11 w-11 rounded-2xl transition-all duration-300 ${
+                    isActive ? 'bg-[#1a1c2e] text-white shadow-lg shadow-indigo-100 scale-110' : 'text-gray-400 hover:text-gray-600'
                   }`}
                 >
                   {item.icon}
                 </span>
                 <span
-                  className={`text-[11px] font-bold uppercase tracking-tight ${
-                    isActive ? 'text-indigo-600' : 'text-gray-400'
+                  className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                    isActive ? 'text-[#1a1c2e]' : 'text-gray-400'
                   }`}
                 >
                   {item.label}
