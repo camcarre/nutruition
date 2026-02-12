@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getOrCreateUser } from '@/app/actions/nutrition'
 
 export function RegisterForm() {
   const router = useRouter()
@@ -25,14 +26,23 @@ export function RegisterForm() {
 
     setIsLoading(true)
     
-    // TODO: Implement actual registration
-    // For now, just simulate registration
-    setTimeout(() => {
-      localStorage.setItem('user', JSON.stringify({ email: formData.email }))
-      window.dispatchEvent(new Event('nutruition:user'))
-      router.push('/')
+    try {
+      const user = await getOrCreateUser(formData.email)
+      if (user) {
+        localStorage.setItem('user', JSON.stringify({ 
+          id: user.id,
+          email: user.email,
+          photoUrl: user.photoUrl 
+        }))
+        window.dispatchEvent(new Event('nutruition:user'))
+        router.push('/')
+      }
+    } catch (error) {
+      console.error('Registration error:', error)
+      setError('Une erreur est survenue lors de l’inscription')
+    } finally {
       setIsLoading(false)
-    }, 1000)
+    }
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

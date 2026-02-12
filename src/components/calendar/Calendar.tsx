@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import {
   format,
   addDays,
@@ -10,9 +10,12 @@ import {
   startOfWeek,
   endOfWeek,
   eachDayOfInterval,
+  isSameDay,
 } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import Link from 'next/link'
+import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
+import { getMealsForInterval } from '@/app/actions/nutrition'
 
 interface Food {
   id: string
@@ -32,17 +35,15 @@ interface MealFood extends Food {
   totalFat: number
 }
 
-interface FavoriteMeal {
+interface Meal {
   id: string
-  name: string
   mealType: 'breakfast' | 'lunch' | 'snack' | 'dinner'
-  foods: MealFood[]
+  date: Date
   totalCalories: number
   totalProtein: number
   totalCarbs: number
   totalFat: number
-  date: string
-  createdAt: string
+  items: any[]
 }
 
 type TDEEStorageResult = {
@@ -50,17 +51,12 @@ type TDEEStorageResult = {
 }
 
 export function Calendar() {
+  const user = useSyncExternalStore(subscribeUser, getUserSnapshot, getUserServerSnapshot)
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
-  const [favoriteMeals] = useState<FavoriteMeal[]>(() => {
-    if (typeof window === 'undefined') return []
-    try {
-      const savedFavorites = localStorage.getItem('favoriteMeals')
-      return savedFavorites ? (JSON.parse(savedFavorites) as FavoriteMeal[]) : []
-    } catch {
-      return []
-    }
-  })
+  const [meals, setMeals] = useState<Meal[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  
   const [tdeeResult] = useState<TDEEStorageResult | null>(() => {
     if (typeof window === 'undefined') return null
     try {
@@ -73,14 +69,36 @@ export function Calendar() {
     }
   })
 
-  const formattedDate = format(selectedDate, 'yyyy-MM-dd')
-
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 })
   const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 1 })
   const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd })
 
-  const mealsByDate = favoriteMeals.reduce<Record<string, FavoriteMeal[]>>((acc, meal) => {
-    ;(acc[meal.date] ??= []).push(meal)
+  useEffect(() => {
+    async function fetchMeals() {
+      if (!user?.id) return
+      
+      setIsLoading(true)
+      try {
+        // Fetch for the whole week to cover both views
+        const startDate = format(weekStart, 'yyyy-MM-dd')
+        const endDate = format(weekEnd, 'yyyy-MM-dd')
+        const dbMeals = await getMealsForInterval(user.id, startDate, endDate)
+        setMeals(dbMeals as any)
+      } catch (error) {
+        console.error('Error fetching meals:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchMeals()
+  }, [user?.id, selectedDate, viewMode])
+
+  const formattedDate = format(selectedDate, 'yyyy-MM-dd')
+
+  const mealsByDate = meals.reduce<Record<string, Meal[]>>((acc, meal) => {
+    const dateKey = format(new Date(meal.date), 'yyyy-MM-dd')
+    ;(acc[dateKey] ??= []).push(meal)
     return acc
   }, {})
 
@@ -105,8 +123,8 @@ export function Calendar() {
   const weekTotals = weekDays.reduce(
     (acc, day) => {
       const dateKey = format(day, 'yyyy-MM-dd')
-      const meals = mealsByDate[dateKey] ?? []
-      for (const meal of meals) {
+      const dayMealsList = mealsByDate[dateKey] ?? []
+      for (const meal of dayMealsList) {
         acc.calories += meal.totalCalories
         acc.protein += meal.totalProtein
         acc.carbs += meal.totalCarbs
@@ -148,6 +166,14 @@ export function Calendar() {
   // Define standard meal types to show even if empty
   const standardMealTypes: ('breakfast' | 'lunch' | 'snack' | 'dinner')[] = ['breakfast', 'lunch', 'snack', 'dinner']
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 border-4 border-[#1a1c2e] border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Date Selector Card */}
@@ -186,7 +212,7 @@ export function Calendar() {
             onClick={() => setViewMode('day')}
             className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
               viewMode === 'day' 
-                ? 'bg-white text-indigo-600 shadow-sm' 
+                ? 'bg-[#1a1c2e] text-white shadow-sm' 
                 : 'text-gray-400'
             }`}
           >
@@ -196,7 +222,7 @@ export function Calendar() {
             onClick={() => setViewMode('week')}
             className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
               viewMode === 'week' 
-                ? 'bg-white text-indigo-600 shadow-sm' 
+                ? 'bg-[#1a1c2e] text-white shadow-sm' 
                 : 'text-gray-400'
             }`}
           >
@@ -322,7 +348,7 @@ export function Calendar() {
               onClick={() => {
                 setViewMode('day')
               }}
-              className="text-xs font-bold text-indigo-600"
+              className="text-xs font-bold text-[#1a1c2e]"
             >
               Voir par jour
             </button>
@@ -369,7 +395,7 @@ export function Calendar() {
                   </div>
                   <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-indigo-600 rounded-full transition-all duration-500 ease-out"
+                      className="h-full bg-[#1a1c2e] rounded-full transition-all duration-500 ease-out"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -382,7 +408,7 @@ export function Calendar() {
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-gray-900">Repas de la journée</h3>
-            <button className="text-xs font-bold text-indigo-600 flex items-center gap-1">
+            <button className="text-xs font-bold text-[#1a1c2e] flex items-center gap-1">
               Historique 
               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -433,7 +459,7 @@ export function Calendar() {
                   </div>
                   <Link 
                     href={`/meal-builder?date=${formattedDate}&type=${type}`}
-                    className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center shadow-sm shadow-indigo-100 hover:bg-indigo-200 transition-colors"
+                    className="w-10 h-10 bg-gray-50 text-[#1a1c2e] rounded-2xl flex items-center justify-center shadow-sm hover:bg-gray-100 transition-colors"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />

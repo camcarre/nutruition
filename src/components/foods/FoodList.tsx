@@ -1,6 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
+import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
+import { getFoods, addCustomFood as addCustomFoodToDB, updateCustomFood as updateCustomFoodToDB, deleteCustomFood as deleteCustomFoodFromDB } from '@/app/actions/nutrition'
 
 interface Food {
   id: string
@@ -13,11 +15,16 @@ interface Food {
   sodium?: number
   category: string
   servingSizeG: number
+  isCustom?: boolean
+  userId?: string | null
 }
 
 export function FoodList() {
+  const user = useSyncExternalStore(subscribeUser, getUserSnapshot, getUserServerSnapshot)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
+  const [foods, setFoods] = useState<Food[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   const [favoriteFoods, setFavoriteFoods] = useState<string[]>(() => {
     if (typeof window === 'undefined') return []
     try {
@@ -28,17 +35,9 @@ export function FoodList() {
     }
   })
   const [showAddModal, setShowAddModal] = useState(false)
-  const [customFoods, setCustomFoods] = useState<Food[]>(() => {
-    if (typeof window === 'undefined') return []
-    try {
-      const savedCustomFoods = localStorage.getItem('customFoods')
-      return savedCustomFoods ? (JSON.parse(savedCustomFoods) as Food[]) : []
-    } catch {
-      return []
-    }
-  })
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingFood, setEditingFood] = useState<Food | null>(null)
+  const [activeTab, setActiveTab] = useState<'all' | 'favorites' | 'custom'>('all')
   
   const [newFood, setNewFood] = useState({
     name: '',
@@ -52,19 +51,20 @@ export function FoodList() {
     servingSizeG: '100'
   })
 
-  // Mock food database
-  const foods: Food[] = [
-    { id: '1', name: 'Oeuf entier', calories: 155, protein: 13, carbs: 1, fat: 11, fiber: 0, sodium: 142, category: 'Protéines', servingSizeG: 100 },
-    { id: '2', name: 'Avoine', calories: 389, protein: 17, carbs: 66, fat: 7, fiber: 11, sodium: 2, category: 'Céréales', servingSizeG: 100 },
-    { id: '3', name: 'Lait demi-écrémé', calories: 46, protein: 3.4, carbs: 4.8, fat: 1.7, fiber: 0, sodium: 44, category: 'Produits laitiers', servingSizeG: 100 },
-    { id: '4', name: 'Poulet grillé', calories: 165, protein: 31, carbs: 0, fat: 3.6, fiber: 0, sodium: 74, category: 'Protéines', servingSizeG: 100 },
-    { id: '5', name: 'Riz blanc cuit', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, fiber: 0.4, sodium: 1, category: 'Céréales', servingSizeG: 100 },
-    { id: '6', name: 'Brocoli cuit', calories: 35, protein: 2.4, carbs: 7.2, fat: 0.4, fiber: 3.3, sodium: 41, category: 'Légumes', servingSizeG: 100 },
-    { id: '7', name: 'Pomme', calories: 52, protein: 0.3, carbs: 14, fat: 0.2, fiber: 2.4, sodium: 1, category: 'Fruits', servingSizeG: 100 },
-    { id: '8', name: 'Banane', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, fiber: 2.6, sodium: 1, category: 'Fruits', servingSizeG: 100 },
-    { id: '9', name: 'Saumon grillé', calories: 206, protein: 22, carbs: 0, fat: 13, fiber: 0, sodium: 59, category: 'Protéines', servingSizeG: 100 },
-    { id: '10', name: 'Pâtes cuites', calories: 158, protein: 6, carbs: 31, fat: 0.9, fiber: 1.8, sodium: 1, category: 'Céréales', servingSizeG: 100 },
-  ]
+  useEffect(() => {
+    async function fetchFoods() {
+      setIsLoading(true)
+      try {
+        const dbFoods = await getFoods(user?.id)
+        setFoods(dbFoods as any)
+      } catch (error) {
+        console.error('Error fetching foods:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    fetchFoods()
+  }, [user?.id])
 
   const categories = ['Protéines', 'Céréales', 'Produits laitiers', 'Légumes', 'Fruits']
 
@@ -77,11 +77,10 @@ export function FoodList() {
     localStorage.setItem('favoriteFoods', JSON.stringify(updatedFavorites))
   }
 
-  const addCustomFood = () => {
-    if (!newFood.name || !newFood.calories || !newFood.category) return
+  const handleAddCustomFood = async () => {
+    if (!newFood.name || !newFood.calories || !newFood.category || !user?.id) return
 
-    const customFood: Food = {
-      id: `custom_${Date.now()}`,
+    const foodData = {
       name: newFood.name,
       calories: parseFloat(newFood.calories),
       protein: parseFloat(newFood.protein) || 0,
@@ -93,33 +92,70 @@ export function FoodList() {
       servingSizeG: parseFloat(newFood.servingSizeG) || 100
     }
 
-    const updatedCustomFoods = [...customFoods, customFood]
-    setCustomFoods(updatedCustomFoods)
-    localStorage.setItem('customFoods', JSON.stringify(updatedCustomFoods))
-    
-    setNewFood({
-      name: '', calories: '', protein: '', carbs: '', fat: '', fiber: '', sodium: '', category: '', servingSizeG: '100'
-    })
-    setShowAddModal(false)
+    try {
+      const createdFood = await addCustomFoodToDB(user.id, foodData)
+      if (createdFood) {
+        setFoods(prev => [...prev, createdFood as any])
+        setNewFood({
+          name: '', calories: '', protein: '', carbs: '', fat: '', fiber: '', sodium: '', category: '', servingSizeG: '100'
+        })
+        setShowAddModal(false)
+      }
+    } catch (error) {
+      console.error('Error adding custom food:', error)
+    }
   }
 
-  const handleUpdateFood = (updatedFood: Food) => {
-    const updatedCustomFoods = customFoods.map(food =>
-      food.id === updatedFood.id ? updatedFood : food
-    )
-    setCustomFoods(updatedCustomFoods)
-    localStorage.setItem('customFoods', JSON.stringify(updatedCustomFoods))
-    setEditingFood(null)
-    setShowEditModal(false)
+  const handleUpdateFood = async (updatedFood: Food) => {
+    if (!user?.id) return
+
+    try {
+      const { id, ...foodData } = updatedFood
+      const success = await updateCustomFoodToDB(id, foodData)
+      if (success) {
+        setFoods(prev => prev.map(f => f.id === id ? updatedFood : f))
+        setEditingFood(null)
+        setShowEditModal(false)
+      }
+    } catch (error) {
+      console.error('Error updating food:', error)
+    }
   }
 
-  const allFoods = [...foods, ...customFoods]
-  
-  const filteredFoods = allFoods.filter(food => {
+  const handleDeleteFood = async (foodId: string) => {
+    if (!user?.id) return
+
+    try {
+      const success = await deleteCustomFoodFromDB(foodId)
+      if (success) {
+        setFoods(prev => prev.filter(f => f.id !== foodId))
+      }
+    } catch (error) {
+      console.error('Error deleting food:', error)
+    }
+  }
+
+  const filteredFoods = foods.filter(food => {
     const matchesSearch = food.name.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesCategory = !selectedCategory || food.category === selectedCategory
-    return matchesSearch && matchesCategory
+    
+    let matchesTab = true
+    if (activeTab === 'favorites') {
+      matchesTab = favoriteFoods.includes(food.id)
+    } else if (activeTab === 'custom') {
+      matchesTab = food.isCustom === true
+    }
+    
+    return matchesSearch && matchesCategory && matchesTab
   })
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -166,23 +202,58 @@ export function FoodList() {
         ))}
       </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-4">
-        <button className="flex-1 bg-white border border-gray-50 rounded-2xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold text-gray-600 shadow-sm">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          Filtres
-        </button>
-        <button 
-          onClick={() => setShowAddModal(true)}
-          className="flex-[1.5] bg-[#e6f7f2] rounded-2xl py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold text-[#27ae60] shadow-sm shadow-[#e6f7f2]"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
-          Ajouter personnalisé
-        </button>
+      {/* Action Buttons & Tabs */}
+      <div className="flex flex-col gap-4">
+        <div className="flex bg-gray-50 p-1.5 rounded-2xl">
+          <button
+            onClick={() => setActiveTab('all')}
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              activeTab === 'all' 
+                ? 'bg-[#1a1c2e] text-white shadow-sm' 
+                : 'text-gray-400'
+            }`}
+          >
+            Tous
+          </button>
+          <button
+            onClick={() => setActiveTab('favorites')}
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              activeTab === 'favorites' 
+                ? 'bg-[#1a1c2e] text-white shadow-sm' 
+                : 'text-gray-400'
+            }`}
+          >
+            Favoris
+          </button>
+          <button
+            onClick={() => setActiveTab('custom')}
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              activeTab === 'custom' 
+                ? 'bg-[#1a1c2e] text-white shadow-sm' 
+                : 'text-gray-400'
+            }`}
+          >
+            Autres
+          </button>
+        </div>
+
+        <div className="flex gap-4">
+          <button className="flex-1 bg-white border border-gray-200 rounded-2xl py-4 px-4 flex items-center justify-center gap-2 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            Filtres
+          </button>
+          <button 
+            onClick={() => setShowAddModal(true)}
+            className="flex-[1.5] bg-[#1a1c2e] rounded-2xl py-4 px-4 flex items-center justify-center gap-2 text-sm font-bold text-white shadow-md hover:bg-[#2a2d4a] transition-all"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            Ajouter un aliment
+          </button>
+        </div>
       </div>
 
       {/* Food Cards */}
@@ -261,7 +332,7 @@ export function FoodList() {
             )}
 
             {/* Edit Button for custom foods */}
-            {food.id.startsWith('custom_') && (
+            {food.userId && food.userId === user?.id && (
               <button
                 onClick={() => {
                   setEditingFood(food)
@@ -280,7 +351,7 @@ export function FoodList() {
 
       {/* Add/Edit Modal (simplified for now to keep the UI clean) */}
       {(showAddModal || showEditModal) && (
-        <div className="fixed inset-0 bg-[#1a1c2e]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl">
             <h3 className="text-2xl font-bold text-gray-900 mb-6">
               {showEditModal ? 'Modifier l\'aliment' : 'Nouvel aliment'}
@@ -361,19 +432,33 @@ export function FoodList() {
               </div>
             </div>
 
-            <div className="flex gap-4 mt-8">
-              <button 
-                onClick={() => { setShowAddModal(false); setShowEditModal(false); setEditingFood(null); }}
-                className="flex-1 py-4 bg-gray-50 text-gray-400 font-bold rounded-2xl hover:bg-gray-100 transition-colors"
-              >
-                Annuler
-              </button>
-              <button 
-                onClick={showEditModal ? () => handleUpdateFood(editingFood!) : addCustomFood}
-                className="flex-1 py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors"
-              >
-                {showEditModal ? 'Mettre à jour' : 'Enregistrer'}
-              </button>
+            <div className="flex flex-col gap-3 mt-8">
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => { setShowAddModal(false); setShowEditModal(false); setEditingFood(null); }}
+                  className="flex-1 py-4 bg-gray-50 text-gray-400 font-bold rounded-2xl hover:bg-gray-100 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button 
+                  onClick={showEditModal ? () => handleUpdateFood(editingFood!) : handleAddCustomFood}
+                  className="flex-1 py-4 bg-[#1a1c2e] text-white font-bold rounded-2xl shadow-lg shadow-gray-200 hover:bg-[#2a2d4a] transition-colors"
+                >
+                  {showEditModal ? 'Mettre à jour' : 'Enregistrer'}
+                </button>
+              </div>
+              
+              {showEditModal && editingFood?.userId === user?.id && editingFood && (
+                 <button 
+                   onClick={() => handleDeleteFood(editingFood.id)}
+                  className="w-full py-4 bg-red-50 text-red-500 font-bold rounded-2xl hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Supprimer l'aliment
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getOrCreateUser } from '@/app/actions/nutrition'
 
 export function LoginForm() {
   const router = useRouter()
@@ -16,14 +17,22 @@ export function LoginForm() {
     e.preventDefault()
     setIsLoading(true)
     
-    // TODO: Implement actual authentication
-    // For now, just simulate login
-    setTimeout(() => {
-      localStorage.setItem('user', JSON.stringify({ email: formData.email }))
-      window.dispatchEvent(new Event('nutruition:user'))
-      router.push('/')
+    try {
+      const user = await getOrCreateUser(formData.email)
+      if (user) {
+        localStorage.setItem('user', JSON.stringify({ 
+          id: user.id,
+          email: user.email,
+          photoUrl: user.photoUrl 
+        }))
+        window.dispatchEvent(new Event('nutruition:user'))
+        router.push('/')
+      }
+    } catch (error) {
+      console.error('Login error:', error)
+    } finally {
       setIsLoading(false)
-    }, 1000)
+    }
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -1,6 +1,7 @@
 'use client'
 
 export type User = {
+  id?: string
   email?: string
   photoUrl?: string
 } | null

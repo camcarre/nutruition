@@ -1,6 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
+import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
+import { updateUserCalories } from '@/app/actions/nutrition'
 
 type Sex = 'M' | 'F' | ''
 type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active' | ''
@@ -141,6 +143,7 @@ const DEFAULT_FORM: TDEEForm = {
 }
 
 export function Calculator() {
+  const user = useSyncExternalStore(subscribeUser, getUserSnapshot, getUserServerSnapshot)
   const [form, setForm] = useState<TDEEForm>(() => {
     if (typeof window === 'undefined') return DEFAULT_FORM
     try {
@@ -318,6 +321,11 @@ export function Calculator() {
 
     setResult(resultData)
     localStorage.setItem('tdeeResult', JSON.stringify(resultData))
+
+    // Sync with DB if user is logged in
+    if (user?.id) {
+      updateUserCalories(user.id, resultData.targetCalories)
+    }
   }
 
   return (

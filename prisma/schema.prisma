@@ -1,0 +1,86 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id             String         @id @default(cuid())
+  email          String         @unique
+  password       String?
+  photoUrl       String?
+  targetCalories Int?           @default(2000)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  foods          Food[]
+  meals          Meal[]
+  favoriteMeals  FavoriteMeal[]
+}
+
+model Food {
+  id             String         @id @default(cuid())
+  name           String
+  calories       Float
+  protein        Float
+  carbs          Float
+  fat            Float
+  servingSizeG   Float          @default(100)
+  category       String?
+  isCustom       Boolean        @default(false)
+  userId         String?
+  user           User?          @relation(fields: [userId], references: [id])
+  mealItems      MealItem[]
+  favoriteItems  FavoriteMealItem[]
+}
+
+model Meal {
+  id             String     @id @default(cuid())
+  userId         String
+  user           User       @relation(fields: [userId], references: [id])
+  date           DateTime
+  mealType       String     // breakfast, lunch, snack, dinner
+  totalCalories  Float
+  totalProtein   Float
+  totalCarbs     Float
+  totalFat       Float
+  items          MealItem[]
+  createdAt      DateTime   @default(now())
+}
+
+model MealItem {
+  id             String @id @default(cuid())
+  mealId         String
+  meal           Meal   @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  foodId         String
+  food           Food   @relation(fields: [foodId], references: [id])
+  quantityG      Float
+  totalCalories  Float
+  totalProtein   Float
+  totalCarbs     Float
+  totalFat       Float
+}
+
+model FavoriteMeal {
+  id             String             @id @default(cuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id])
+  name           String
+  mealType       String
+  totalCalories  Float
+  totalProtein   Float
+  totalCarbs     Float
+  totalFat       Float
+  items          FavoriteMealItem[]
+  createdAt      DateTime           @default(now())
+}
+
+model FavoriteMealItem {
+  id             String       @id @default(cuid())
+  favoriteMealId String
+  favoriteMeal   FavoriteMeal @relation(fields: [favoriteMealId], references: [id], onDelete: Cascade)
+  foodId         String
+  food           Food         @relation(fields: [foodId], references: [id])
+  quantityG      Float
+}

@@ -1,8 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
+import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
+import { 
+  getFavoriteMeals, 
+  saveMeal as saveMealToDB, 
+  addFavoriteMeal as addFavoriteToDB,
+  deleteFavoriteMeal as deleteFavoriteFromDB,
+  getFoods
+} from '@/app/actions/nutrition'
 import { 
   format, 
   addDays, 
@@ -16,7 +24,8 @@ import {
   isSameDay, 
   addMonths, 
   subMonths,
-  isToday
+  isToday,
+  parseISO
 } from 'date-fns'
 import { fr } from 'date-fns/locale'
 
@@ -42,13 +51,13 @@ interface FavoriteMeal {
   id: string
   name: string
   mealType: 'breakfast' | 'lunch' | 'snack' | 'dinner'
-  foods: MealFood[]
+  foods: any[]
   totalCalories: number
   totalProtein: number
   totalCarbs: number
   totalFat: number
-  date: string // New field for selected date
-  createdAt: string
+  date?: string
+  createdAt?: string
 }
 
 type TDEEStorageResult = {
@@ -71,42 +80,84 @@ function stableHashBase36(input: string) {
 
 export function MealBuilder() {
   const searchParams = useSearchParams()
+  const user = useSyncExternalStore(subscribeUser, getUserSnapshot, getUserServerSnapshot)
 
-  const [mealType, setMealType] = useState<'breakfast' | 'lunch' | 'snack' | 'dinner'>('breakfast')
-  const [foods, setFoods] = useState<MealFood[]>([])
-  const [searchQuery, setSearchQuery] = useState('')
-  const [showFoodSearch, setShowFoodSearch] = useState(false)
-  const [favoriteMeals, setFavoriteMeals] = useState<FavoriteMeal[]>(() => {
-    if (typeof window === 'undefined') return []
-    try {
-      const savedFavorites = localStorage.getItem('favoriteMeals')
-      return savedFavorites ? (JSON.parse(savedFavorites) as FavoriteMeal[]) : []
-    } catch {
-      return []
-    }
-  })
-  const [showFavorites, setShowFavorites] = useState(false)
-  const [mealName, setMealName] = useState('')
-  const [showSaveModal, setShowSaveModal] = useState(false)
-  const [tdeeResult] = useState<TDEEStorageResult | null>(() => {
-    if (typeof window === 'undefined') return null
-    try {
-      const savedTDEE = localStorage.getItem('tdeeResult')
-      if (!savedTDEE) return null
-      const parsed = JSON.parse(savedTDEE) as Partial<TDEEStorageResult>
-      return typeof parsed?.targetCalories === 'number' ? (parsed as TDEEStorageResult) : null
-    } catch {
-      return null
-    }
-  })
   const [selectedDate, setSelectedDate] = useState(() => {
-    return searchParams.get('date') ?? new Date().toISOString().split('T')[0]
-  })
+     const dateParam = searchParams.get('date')
+     if (dateParam) return dateParam
+     return format(new Date(), 'yyyy-MM-dd')
+   })
+   const [mealType, setMealType] = useState<'breakfast' | 'lunch' | 'snack' | 'dinner'>(() => {
+     const typeParam = searchParams.get('type') as any
+     if (typeParam && ['breakfast', 'lunch', 'snack', 'dinner'].includes(typeParam)) {
+       return typeParam
+     }
+     return 'breakfast'
+   })
+   const [foods, setFoods] = useState<MealFood[]>([])
+   const [searchQuery, setSearchQuery] = useState('')
+   const [showFoodSearch, setShowFoodSearch] = useState(false)
+   const [availableFoods, setAvailableFoods] = useState<Food[]>([])
+   const [favoriteMeals, setFavoriteMeals] = useState<FavoriteMeal[]>([])
+   const [isLoadingFavorites, setIsLoadingFavorites] = useState(false)
+   const [showFavorites, setShowFavorites] = useState(false)
+   const [mealName, setMealName] = useState('')
+   const [showSaveModal, setShowSaveModal] = useState(false)
+   const [isSaving, setIsSaving] = useState(false)
+   const [tdeeResult] = useState<TDEEStorageResult | null>(() => {
+     if (typeof window === 'undefined') return null
+     try {
+       const savedTDEE = localStorage.getItem('tdeeResult')
+       if (!savedTDEE) return null
+       const parsed = JSON.parse(savedTDEE) as Partial<TDEEStorageResult>
+       return typeof parsed?.targetCalories === 'number' ? (parsed as TDEEStorageResult) : null
+     } catch {
+       return null
+     }
+   })
+
+   // Fetch data from DB
+   useEffect(() => {
+     async function fetchData() {
+       if (!user?.id) return
+       
+       setIsLoadingFavorites(true)
+       try {
+         const [favs, dbFoods] = await Promise.all([
+           getFavoriteMeals(user.id),
+           getFoods(user.id)
+         ])
+         
+         const mappedFavs: FavoriteMeal[] = favs.map((f: any) => ({
+           id: f.id,
+           name: f.name,
+           mealType: f.mealType as any,
+           totalCalories: f.totalCalories,
+           totalProtein: f.totalProtein,
+           totalCarbs: f.totalCarbs,
+           totalFat: f.totalFat,
+           foods: f.items.map((item: any) => ({
+             ...item.food,
+             quantityG: item.quantityG
+           }))
+         }))
+         
+         setFavoriteMeals(mappedFavs)
+         setAvailableFoods(dbFoods as any)
+       } catch (error) {
+         console.error('Error fetching data:', error)
+       } finally {
+         setIsLoadingFavorites(false)
+       }
+     }
+     
+     fetchData()
+   }, [user?.id])
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [viewDate, setViewDate] = useState(new Date())
 
-  // Mock food data
-  const availableFoods: Food[] = [
+  // Default foods if DB is empty
+  const defaultFoods: Food[] = [
     { id: '1', name: 'Oeuf entier', calories: 155, protein: 13, carbs: 1, fat: 11, servingSizeG: 100 },
     { id: '2', name: 'Avoine', calories: 389, protein: 17, carbs: 66, fat: 7, servingSizeG: 100 },
     { id: '3', name: 'Lait demi-écrémé', calories: 46, protein: 3.4, carbs: 4.8, fat: 1.7, servingSizeG: 100 },
@@ -116,6 +167,9 @@ export function MealBuilder() {
     { id: '7', name: 'Pomme', calories: 52, protein: 0.3, carbs: 14, fat: 0.2, servingSizeG: 100 },
     { id: '8', name: 'Banane', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, servingSizeG: 100 },
   ]
+
+  const displayFoods = availableFoods.length > 0 ? availableFoods : defaultFoods
+
 
   const addFood = (food: Food, quantityG: number) => {
     const totalCalories = Math.round((food.calories * quantityG) / food.servingSizeG)
@@ -172,46 +226,116 @@ export function MealBuilder() {
     { calories: 0, protein: 0, carbs: 0, fat: 0 }
   )
 
-  const saveAsFavorite = () => {
-    if (!mealName.trim() || foods.length === 0) return
+  const saveAsFavorite = async () => {
+    if (!mealName.trim() || foods.length === 0 || !user?.id) return
 
-    const idSeed = `${selectedDate}|${mealType}|${mealName.trim()}|${foods
-      .map((f) => `${f.id}:${f.quantityG}`)
-      .join(',')}`
-    const favoriteId = `${stableHashBase36(idSeed)}-${favoriteMeals.length + 1}`
+    setIsSaving(true)
+    try {
+      const favoriteData = {
+        name: mealName.trim(),
+        mealType,
+        foods: foods.map(f => ({ id: f.id, quantityG: f.quantityG })),
+        totalCalories: Math.round(totalNutrients.calories),
+        totalProtein: Math.round(totalNutrients.protein * 10) / 10,
+        totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
+        totalFat: Math.round(totalNutrients.fat * 10) / 10
+      }
 
-    const newFavoriteMeal: FavoriteMeal = {
-      id: favoriteId,
-      name: mealName.trim(),
-      mealType,
-      foods: [...foods],
-      totalCalories: Math.round(totalNutrients.calories),
-      totalProtein: Math.round(totalNutrients.protein * 10) / 10,
-      totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
-      totalFat: Math.round(totalNutrients.fat * 10) / 10,
-      date: selectedDate, // Add the selected date
-      createdAt: new Date().toISOString()
+      const newFavorite = await addFavoriteToDB(user.id, favoriteData)
+      
+      if (newFavorite) {
+        // Refresh favorites list
+        const favs = await getFavoriteMeals(user.id)
+        const mappedFavs: FavoriteMeal[] = favs.map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          mealType: f.mealType as any,
+          totalCalories: f.totalCalories,
+          totalProtein: f.totalProtein,
+          totalCarbs: f.totalCarbs,
+          totalFat: f.totalFat,
+          foods: f.items.map((item: any) => ({
+            ...item.food,
+            quantityG: item.quantityG
+          }))
+        }))
+        setFavoriteMeals(mappedFavs)
+      }
+
+      setMealName('')
+      setShowSaveModal(false)
+    } catch (error) {
+      console.error('Error saving favorite:', error)
+    } finally {
+      setIsSaving(false)
     }
-
-    const updatedFavorites = [...favoriteMeals, newFavoriteMeal]
-    setFavoriteMeals(updatedFavorites)
-    localStorage.setItem('favoriteMeals', JSON.stringify(updatedFavorites))
-    
-    setMealName('')
-    setShowSaveModal(false)
   }
 
   const loadFavoriteMeal = (favoriteMeal: FavoriteMeal) => {
-    setFoods([...favoriteMeal.foods])
+    const loadedFoods = favoriteMeal.foods.map(food => {
+      const quantityG = food.quantityG
+      return {
+        ...food,
+        totalCalories: Math.round((food.calories * quantityG) / food.servingSizeG),
+        totalProtein: Math.round((food.protein * quantityG) / food.servingSizeG * 10) / 10,
+        totalCarbs: Math.round((food.carbs * quantityG) / food.servingSizeG * 10) / 10,
+        totalFat: Math.round((food.fat * quantityG) / food.servingSizeG * 10) / 10
+      }
+    })
+    
+    setFoods(loadedFoods)
     setMealType(favoriteMeal.mealType)
-    setSelectedDate(favoriteMeal.date) // Set the selected date from the favorite meal
     setShowFavorites(false)
   }
 
-  const deleteFavoriteMeal = (id: string) => {
-    const updatedFavorites = favoriteMeals.filter(meal => meal.id !== id)
-    setFavoriteMeals(updatedFavorites)
-    localStorage.setItem('favoriteMeals', JSON.stringify(updatedFavorites))
+  const handleDeleteFavoriteMeal = async (id: string) => {
+    if (!user?.id) return
+
+    try {
+      const success = await deleteFavoriteFromDB(id)
+      if (success) {
+        setFavoriteMeals(prev => prev.filter(meal => meal.id !== id))
+      }
+    } catch (error) {
+      console.error('Error deleting favorite:', error)
+    }
+  }
+
+  const handleSaveMeal = async () => {
+    if (foods.length === 0 || !user?.id) return
+
+    setIsSaving(true)
+    try {
+      const mealData = {
+        date: selectedDate,
+        mealType,
+        foods: foods.map(f => ({
+          id: f.id,
+          quantityG: f.quantityG,
+          totalCalories: f.totalCalories,
+          totalProtein: f.totalProtein,
+          totalCarbs: f.totalCarbs,
+          totalFat: f.totalFat
+        })),
+        totalCalories: Math.round(totalNutrients.calories),
+        totalProtein: Math.round(totalNutrients.protein * 10) / 10,
+        totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
+        totalFat: Math.round(totalNutrients.fat * 10) / 10
+      }
+
+      const savedMeal = await saveMealToDB(user.id, mealData)
+      if (savedMeal) {
+        // Clear foods after saving to calendar
+        setFoods([])
+        // Show success message or redirect? 
+        // For now just clear and maybe a toast if available
+        alert('Repas enregistré dans le calendrier !')
+      }
+    } catch (error) {
+      console.error('Error saving meal:', error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const mealTypeLabels = {
@@ -226,12 +350,12 @@ export function MealBuilder() {
   >
 
   const handlePreviousDay = () => {
-    const previousDay = subDays(new Date(selectedDate), 1)
+    const previousDay = subDays(parseISO(selectedDate), 1)
     setSelectedDate(format(previousDay, 'yyyy-MM-dd'))
   }
 
   const handleNextDay = () => {
-    const nextDay = addDays(new Date(selectedDate), 1)
+    const nextDay = addDays(parseISO(selectedDate), 1)
     setSelectedDate(format(nextDay, 'yyyy-MM-dd'))
   }
 
@@ -275,7 +399,7 @@ export function MealBuilder() {
         </button>
         <button 
           onClick={() => {
-            setViewDate(new Date(selectedDate))
+            setViewDate(parseISO(selectedDate))
             setShowDatePicker(true)
           }}
           className="flex items-center gap-2 hover:bg-gray-50 px-3 py-1 rounded-xl transition-colors"
@@ -284,7 +408,7 @@ export function MealBuilder() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
           <span className="font-semibold text-gray-800 capitalize">
-            {format(new Date(selectedDate), 'EEEE d MMMM', { locale: fr })}
+            {format(parseISO(selectedDate), 'EEEE d MMMM', { locale: fr })}
           </span>
         </button>
         <button
@@ -342,8 +466,8 @@ export function MealBuilder() {
             onClick={() => setMealType(key)}
             className={`flex items-center gap-2 px-4 py-3 rounded-2xl whitespace-nowrap transition-all border ${
               mealType === key
-                ? 'bg-indigo-50 border-indigo-200 text-indigo-600 shadow-sm'
-                : 'bg-white border-gray-100 text-gray-500'
+                ? 'bg-[#1a1c2e] border-transparent text-white shadow-sm'
+                : 'bg-white border-gray-100 text-gray-400'
             }`}
           >
             <span>{icon}</span>
@@ -359,14 +483,14 @@ export function MealBuilder() {
           <h3 className="font-bold text-gray-900">Plats favoris</h3>
         </div>
         <button 
-          onClick={() => setShowFavorites(true)}
-          className="text-indigo-600 text-sm font-semibold flex items-center gap-1"
-        >
-          Voir tout 
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-          </svg>
-        </button>
+            onClick={() => setShowFavorites(true)}
+            className="text-[#1a1c2e] text-sm font-semibold flex items-center gap-1"
+          >
+            Voir tout 
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+            </svg>
+          </button>
       </div>
 
       {/* Foods List Section */}
@@ -391,10 +515,10 @@ export function MealBuilder() {
             </div>
             <button
               onClick={() => setShowFoodSearch(true)}
-              className="mt-2 bg-indigo-600 text-white w-10 h-10 rounded-full shadow-lg shadow-indigo-200 flex items-center justify-center hover:bg-indigo-700 transition-colors"
+              className="mt-2 bg-[#1a1c2e] text-white w-12 h-12 rounded-full shadow-xl flex items-center justify-center hover:bg-[#2a2d4a] transition-all hover:scale-105 active:scale-95"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
               </svg>
             </button>
           </div>
@@ -433,7 +557,7 @@ export function MealBuilder() {
             
             <button
               onClick={() => setShowFoodSearch(true)}
-              className="w-full py-4 border-2 border-dashed border-indigo-100 rounded-2xl text-indigo-400 font-bold text-sm hover:bg-indigo-50/30 transition-colors flex items-center justify-center gap-2"
+              className="w-full py-4 border-2 border-dashed border-gray-100 rounded-2xl text-gray-400 font-bold text-sm hover:bg-gray-50/30 transition-colors flex items-center justify-center gap-2"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -441,13 +565,27 @@ export function MealBuilder() {
               Ajouter un aliment
             </button>
 
-            <div className="pt-2">
+            <div className="pt-2 grid grid-cols-2 gap-3">
               <button
                 onClick={() => setShowSaveModal(true)}
-                className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                className="w-full bg-white border-2 border-[#1a1c2e] text-[#1a1c2e] py-4 rounded-2xl font-bold hover:bg-gray-50 transition-all flex items-center justify-center gap-2"
               >
-                <span>💾</span>
-                Sauvegarder ce repas
+                <span>⭐</span>
+                Favoris
+              </button>
+              <button
+                onClick={handleSaveMeal}
+                disabled={isSaving || foods.length === 0}
+                className="w-full bg-[#1a1c2e] text-white py-4 rounded-2xl font-bold shadow-lg shadow-gray-200 hover:bg-[#2a2d4a] disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+              >
+                {isSaving ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <span>✅</span>
+                    Valider
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -476,7 +614,7 @@ export function MealBuilder() {
 
       {/* Food Search Modal */}
       {showFoodSearch && (
-        <div className="fixed inset-0 bg-[#1a1c2e]/80 backdrop-blur-sm z-50 flex items-end">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end">
           <div className="w-full bg-white rounded-t-[2.5rem] p-6 shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
             <div className="w-12 h-1.5 bg-gray-100 rounded-full mx-auto mb-6" />
             <div className="flex justify-between items-center mb-6">
@@ -518,7 +656,7 @@ export function MealBuilder() {
                   </div>
                   <button
                     onClick={() => addFood(food, food.servingSizeG)}
-                    className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-100 hover:bg-indigo-700 transition-colors"
+                    className="bg-[#1a1c2e] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-gray-200 hover:bg-[#2a2d4a] transition-colors"
                   >
                     Ajouter
                   </button>
@@ -531,7 +669,7 @@ export function MealBuilder() {
 
       {/* Save Meal Modal */}
       {showSaveModal && (
-        <div className="fixed inset-0 bg-[#1a1c2e]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
             <h3 className="text-2xl font-bold text-gray-900 mb-6">Sauvegarder le plat</h3>
             <div className="space-y-6">
@@ -555,7 +693,7 @@ export function MealBuilder() {
                 <button
                   onClick={saveAsFavorite}
                   disabled={!mealName.trim()}
-                  className="flex-1 py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 disabled:opacity-50 transition-all"
+                  className="flex-1 py-4 bg-[#1a1c2e] text-white font-bold rounded-2xl shadow-lg shadow-gray-200 hover:bg-[#2a2d4a] disabled:opacity-50 transition-all"
                 >
                   Enregistrer
                 </button>
@@ -567,7 +705,7 @@ export function MealBuilder() {
 
       {/* Favorite Meals Modal */}
       {showFavorites && (
-        <div className="fixed inset-0 bg-[#1a1c2e]/80 backdrop-blur-sm z-50 flex items-end">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end">
           <div className="w-full bg-white rounded-t-[2.5rem] p-6 shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
             <div className="w-12 h-1.5 bg-gray-100 rounded-full mx-auto mb-6" />
             <div className="flex justify-between items-center mb-6">
@@ -602,7 +740,7 @@ export function MealBuilder() {
                           </div>
                         </div>
                         <button
-                          onClick={() => deleteFavoriteMeal(meal.id)}
+                          onClick={() => handleDeleteFavoriteMeal(meal.id)}
                           className="w-8 h-8 flex items-center justify-center rounded-full bg-red-50 text-red-400 hover:text-red-600 transition-colors"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -628,7 +766,7 @@ export function MealBuilder() {
 
                       <button
                         onClick={() => loadFavoriteMeal(meal)}
-                        className="w-full bg-white border border-indigo-100 text-indigo-600 py-3 rounded-2xl text-sm font-bold hover:bg-indigo-50 transition-colors"
+                        className="w-full bg-white border border-gray-100 text-[#1a1c2e] py-3 rounded-2xl text-sm font-bold hover:bg-gray-50 transition-colors"
                       >
                         Charger ce plat
                       </button>
@@ -642,7 +780,7 @@ export function MealBuilder() {
       )}
       {/* Date Picker Modal */}
       {showDatePicker && (
-        <div className="fixed inset-0 bg-[#1a1c2e]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold text-gray-900 capitalize">
@@ -685,7 +823,7 @@ export function MealBuilder() {
                 const days = eachDayOfInterval({ start: startDate, end: endDate })
 
                 return days.map((day) => {
-                  const isSelected = isSameDay(day, new Date(selectedDate))
+                  const isSelected = isSameDay(day, parseISO(selectedDate))
                   const isCurrentMonth = isSameMonth(day, monthStart)
                   const isCurrentDay = isToday(day)
 
@@ -693,15 +831,15 @@ export function MealBuilder() {
                     <button
                       key={day.toString()}
                       onClick={() => {
-                        setSelectedDate(day.toISOString().split('T')[0])
+                        setSelectedDate(format(day, 'yyyy-MM-dd'))
                         setShowDatePicker(false)
                       }}
                       className={`
                         h-10 w-10 flex items-center justify-center rounded-xl text-sm font-medium transition-all
-                        ${isSelected ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 scale-110 z-10' : ''}
-                        ${!isSelected && isCurrentMonth ? 'text-gray-900 hover:bg-indigo-50 hover:text-indigo-600' : ''}
+                        ${isSelected ? 'bg-[#1a1c2e] text-white shadow-lg shadow-gray-200 scale-110 z-10' : ''}
+                        ${!isSelected && isCurrentMonth ? 'text-gray-900 hover:bg-gray-50 hover:text-[#1a1c2e]' : ''}
                         ${!isSelected && !isCurrentMonth ? 'text-gray-200' : ''}
-                        ${isCurrentDay && !isSelected ? 'text-indigo-600 font-bold border border-indigo-100' : ''}
+                        ${isCurrentDay && !isSelected ? 'text-[#1a1c2e] font-bold border border-gray-100' : ''}
                       `}
                     >
                       {format(day, 'd')}
@@ -711,12 +849,25 @@ export function MealBuilder() {
               })()}
             </div>
 
-            <button
-              onClick={() => setShowDatePicker(false)}
-              className="w-full mt-6 py-4 bg-gray-50 text-gray-400 font-bold rounded-2xl hover:bg-gray-100 transition-colors"
-            >
-              Fermer
-            </button>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => {
+                  const today = new Date()
+                  setSelectedDate(format(today, 'yyyy-MM-dd'))
+                  setViewDate(today)
+                  setShowDatePicker(false)
+                }}
+                className="flex-1 py-4 bg-gray-50 text-gray-900 font-bold rounded-2xl hover:bg-gray-100 transition-colors text-sm"
+              >
+                Aujourd'hui
+              </button>
+              <button
+                onClick={() => setShowDatePicker(false)}
+                className="flex-1 py-4 bg-[#1a1c2e] text-white font-bold rounded-2xl hover:bg-[#2a2d4a] transition-colors text-sm"
+              >
+                Fermer
+              </button>
+            </div>
           </div>
         </div>
       )}
