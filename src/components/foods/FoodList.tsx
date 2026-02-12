@@ -39,6 +39,8 @@ export function FoodList() {
   const [editingFood, setEditingFood] = useState<Food | null>(null)
   const [activeTab, setActiveTab] = useState<'all' | 'favorites' | 'custom'>('all')
   
+  const [isFilterFavorites, setIsFilterFavorites] = useState(false)
+  
   const [newFood, setNewFood] = useState({
     name: '',
     calories: '',
@@ -139,14 +141,13 @@ export function FoodList() {
     const matchesSearch = food.name.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesCategory = !selectedCategory || food.category === selectedCategory
     
-    let matchesTab = true
-    if (activeTab === 'favorites') {
-      matchesTab = favoriteFoods.includes(food.id)
-    } else if (activeTab === 'custom') {
-      matchesTab = food.isCustom === true
-    }
+    const matchesTab = activeTab === 'all' || 
+                     (activeTab === 'favorites' && favoriteFoods.includes(food.id)) ||
+                     (activeTab === 'custom' && food.isCustom === true)
     
-    return matchesSearch && matchesCategory && matchesTab
+    const matchesFavoritesToggle = !isFilterFavorites || favoriteFoods.includes(food.id)
+    
+    return matchesSearch && matchesCategory && matchesTab && matchesFavoritesToggle
   })
 
   if (isLoading) {
@@ -238,11 +239,18 @@ export function FoodList() {
         </div>
 
         <div className="flex gap-4">
-          <button className="flex-1 bg-white border border-gray-200 rounded-2xl py-4 px-4 flex items-center justify-center gap-2 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+          <button 
+            onClick={() => setIsFilterFavorites(!isFilterFavorites)}
+            className={`flex-1 border rounded-2xl py-4 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-all ${
+              isFilterFavorites 
+                ? 'bg-yellow-50 border-yellow-200 text-yellow-600 shadow-sm' 
+                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ${isFilterFavorites ? 'text-yellow-500' : 'text-gray-400'}`} fill={isFilterFavorites ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
             </svg>
-            Filtres
+            {isFilterFavorites ? 'Favoris' : 'Filtres'}
           </button>
           <button 
             onClick={() => setShowAddModal(true)}
@@ -257,9 +265,13 @@ export function FoodList() {
       </div>
 
       {/* Food Cards */}
-      <div className="space-y-6">
-        {filteredFoods.map((food) => (
-          <div key={food.id} className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-50 relative overflow-hidden">
+      <div className="space-y-6 min-h-[200px]">
+        {filteredFoods.length > 0 ? (
+          filteredFoods.map((food) => (
+            <div 
+              key={food.id} 
+              className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-50 relative overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
             {/* Badge Category */}
             <div className="flex justify-between items-start mb-4">
               <span className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
@@ -346,7 +358,30 @@ export function FoodList() {
               </button>
             )}
           </div>
-        ))}
+        ))
+      ) : (
+        <div className="flex flex-col items-center justify-center py-12 px-4 text-center space-y-4 bg-gray-50/50 rounded-[2rem] border-2 border-dashed border-gray-100 animate-in fade-in duration-500">
+          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-sm text-2xl">
+            {isFilterFavorites ? '⭐' : '🔍'}
+          </div>
+          <div>
+            <p className="text-gray-900 font-bold">Aucun aliment trouvé</p>
+            <p className="text-gray-400 text-sm">
+              {isFilterFavorites 
+                ? "Vous n'avez pas encore d'aliments favoris." 
+                : "Essayez de modifier vos critères de recherche."}
+            </p>
+          </div>
+          {isFilterFavorites && (
+            <button 
+              onClick={() => setIsFilterFavorites(false)}
+              className="text-indigo-600 font-bold text-sm hover:underline"
+            >
+              Voir tous les aliments
+            </button>
+          )}
+        </div>
+      )}
       </div>
 
       {/* Add/Edit Modal (simplified for now to keep the UI clean) */}
