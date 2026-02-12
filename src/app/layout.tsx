@@ -4,6 +4,7 @@ import './globals.css'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister'
 import { SyncListener } from '@/components/pwa/SyncListener'
+import { ReminderListener } from '@/components/pwa/ReminderListener'
 import { SplashScreen } from '@/components/layout/SplashScreen'
 import { DynamicIsland } from '@/components/layout/DynamicIsland'
 
@@ -46,6 +47,7 @@ export default function RootLayout({
         <DynamicIsland />
         <ServiceWorkerRegister />
         <SyncListener />
+        <ReminderListener />
         <div className="min-h-screen max-w-mobile mx-auto bg-white">
           <main className="pb-20">
             {children}

@@ -3,10 +3,12 @@
 import { useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { subscribeUser, getUserSnapshot, getUserServerSnapshot, type User } from '@/lib/userStore'
+import { ReminderSettings } from './ReminderSettings'
 
 export function Header() {
   const router = useRouter()
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+  const [showReminders, setShowReminders] = useState(false)
   const user = useSyncExternalStore(
     subscribeUser,
     getUserSnapshot,
@@ -17,22 +19,6 @@ export function Header() {
     localStorage.removeItem('user')
     window.dispatchEvent(new Event('nutruition:user'))
     router.push('/login')
-  }
-
-  const handleEnableNotifications = async () => {
-    if (!('Notification' in window)) {
-      alert("Ce navigateur ne supporte pas les notifications.")
-      return
-    }
-
-    const permission = await Notification.requestPermission()
-    if (permission === "granted") {
-      console.log("Notifications activées")
-      alert("Notifications activées !")
-    } else {
-      console.log("Permission refusée")
-    }
-    setShowProfileMenu(false)
   }
 
   const userInitial = user?.email ? user.email[0].toUpperCase() : 'N'
@@ -87,7 +73,10 @@ export function Header() {
                 </button>
 
                 <button 
-                  onClick={handleEnableNotifications}
+                  onClick={() => {
+                    setShowProfileMenu(false)
+                    setShowReminders(true)
+                  }}
                   className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50 rounded-2xl flex items-center gap-3 transition-colors"
                 >
                   <div className="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center">
@@ -95,7 +84,7 @@ export function Header() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                     </svg>
                   </div>
-                  Notifications
+                  Rappels
                 </button>
 
                 <button 
@@ -114,6 +103,10 @@ export function Header() {
           </>
         )}
       </div>
+      <ReminderSettings 
+        isOpen={showReminders} 
+        onClose={() => setShowReminders(false)} 
+      />
     </div>
   )
 }
