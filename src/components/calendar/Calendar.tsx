@@ -156,11 +156,11 @@ export function Calendar() {
       ? `Semaine du ${format(weekStart, 'd MMM', { locale: fr })} au ${format(weekEnd, 'd MMM', { locale: fr })}`
       : format(selectedDate, 'EEEE d MMMM', { locale: fr })
 
-  const mealTypeLabels = {
-    breakfast: { label: 'Petit-déjeuner', icon: '🥣', time: '07:30' },
-    lunch: { label: 'Déjeuner', icon: '🍱', time: '12:45' },
-    snack: { label: 'Collation', icon: '🍎', time: '16:00' },
-    dinner: { label: 'Dîner', icon: '🍗', time: '20:00' }
+  const mealTypeLabels: Record<string, { label: string, icon: string, time: string, id: string }> = {
+    breakfast: { id: 'breakfast', label: 'Petit-déjeuner', icon: '🥣', time: '07:30' },
+    lunch: { id: 'lunch', label: 'Déjeuner', icon: '🍱', time: '12:45' },
+    snack: { id: 'snack', label: 'Collation', icon: '🍎', time: '16:00' },
+    dinner: { id: 'dinner', label: 'Dîner', icon: '🍗', time: '20:00' }
   }
 
   // Define standard meal types to show even if empty
@@ -423,7 +423,11 @@ export function Calendar() {
 
               if (meal) {
                 return (
-                  <div key={meal.id} className="bg-white rounded-[1.5rem] p-4 shadow-sm border border-gray-50 flex items-center justify-between">
+                  <Link 
+                    key={meal.id} 
+                    href={`/meal-builder?date=${formattedDate}&type=${type}`}
+                    className="bg-white rounded-[1.5rem] p-4 shadow-sm border border-gray-50 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                  >
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-2xl shadow-sm">
                         {labelInfo.icon}
@@ -442,7 +446,7 @@ export function Calendar() {
                     <div className="text-xs font-bold text-gray-300">
                       {labelInfo.time}
                     </div>
-                  </div>
+                  </Link>
                 )
               }
 
