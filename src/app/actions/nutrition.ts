@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache'
 
 export async function getOrCreateUser(email: string) {
   try {
-    let user = await prisma.user.findUnique({
+    let user = await prisma.user.findFirst({
       where: { email }
     })
 
