@@ -3,6 +3,9 @@
 import { useState, useEffect, useSyncExternalStore } from 'react'
 import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
 import { getFoods, addCustomFood as addCustomFoodToDB, updateCustomFood as updateCustomFoodToDB, deleteCustomFood as deleteCustomFoodFromDB } from '@/app/actions/nutrition'
+import { parseMealWithAI } from '@/app/actions/ai'
+import { showIsland } from '@/lib/uiStore'
+import { getOfflineFoods, saveOfflineFood } from '@/lib/offlineDb'
 
 interface Food {
   id: string
@@ -38,6 +41,7 @@ export function FoodList() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingFood, setEditingFood] = useState<Food | null>(null)
   const [activeTab, setActiveTab] = useState<'all' | 'favorites' | 'custom'>('all')
+  const [isAISearching, setIsAISearching] = useState(false)
   
   const [isFilterFavorites, setIsFilterFavorites] = useState(false)
   
@@ -53,12 +57,52 @@ export function FoodList() {
     servingSizeG: '100'
   })
 
+  // Aliments par défaut si la base est vide
+  const defaultFoods: Food[] = [
+    { id: '1', name: 'Oeuf entier', calories: 155, protein: 13, carbs: 1, fat: 11, servingSizeG: 100, category: 'Protéines' },
+    { id: '2', name: 'Avoine', calories: 389, protein: 17, carbs: 66, fat: 7, servingSizeG: 100, category: 'Céréales' },
+    { id: '3', name: 'Lait demi-écrémé', calories: 46, protein: 3.4, carbs: 4.8, fat: 1.7, servingSizeG: 100, category: 'Produits laitiers' },
+    { id: '4', name: 'Poulet grillé', calories: 165, protein: 31, carbs: 0, fat: 3.6, servingSizeG: 100, category: 'Protéines' },
+    { id: '5', name: 'Riz blanc cuit', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, servingSizeG: 100, category: 'Céréales' },
+    { id: '6', name: 'Brocoli cuit', calories: 35, protein: 2.4, carbs: 7.2, fat: 0.4, servingSizeG: 100, category: 'Légumes' },
+    { id: '7', name: 'Pomme', calories: 52, protein: 0.3, carbs: 14, fat: 0.2, servingSizeG: 100, category: 'Fruits' },
+    { id: '8', name: 'Banane', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, servingSizeG: 100, category: 'Fruits' },
+  ]
+
+  // Fusionner les aliments de la BDD avec les aliments par défaut (sans doublons par nom)
+  const displayFoods = [
+    ...foods,
+    ...defaultFoods.filter(df => !foods.some(f => f.name.toLowerCase() === df.name.toLowerCase()))
+  ]
+
   useEffect(() => {
     async function fetchFoods() {
       setIsLoading(true)
       try {
+        // Tenter de charger depuis IndexedDB d'abord
+        const offlineFoods = await getOfflineFoods()
+        if (offlineFoods.length > 0) {
+          setFoods(offlineFoods as any)
+        }
+
         const dbFoods = await getFoods(user?.id)
         setFoods(dbFoods as any)
+
+        // Mettre à jour le cache local
+        for (const food of (dbFoods as any)) {
+          await saveOfflineFood({
+            id: food.id,
+            name: food.name,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            servingSizeG: food.servingSizeG,
+            category: food.category || 'Autres',
+            isCustom: food.isCustom || false,
+            userId: food.userId
+          })
+        }
       } catch (error) {
         console.error('Error fetching foods:', error)
       } finally {
@@ -68,7 +112,7 @@ export function FoodList() {
     fetchFoods()
   }, [user?.id])
 
-  const categories = ['Protéines', 'Céréales', 'Produits laitiers', 'Légumes', 'Fruits']
+  const categories = ['Protéines', 'Céréales', 'Produits laitiers', 'Légumes', 'Fruits', 'Autres']
 
   const toggleFavorite = (foodId: string) => {
     const updatedFavorites = favoriteFoods.includes(foodId)
@@ -97,7 +141,23 @@ export function FoodList() {
     try {
       const createdFood = await addCustomFoodToDB(user.id, foodData)
       if (createdFood) {
-        setFoods(prev => [...prev, createdFood as any])
+        const food = createdFood as any
+        setFoods(prev => [...prev, food])
+        
+        // Sauvegarder dans le cache offline
+        await saveOfflineFood({
+          id: food.id,
+          name: food.name,
+          calories: food.calories,
+          protein: food.protein,
+          carbs: food.carbs,
+          fat: food.fat,
+          servingSizeG: food.servingSizeG,
+          category: food.category || 'Autres',
+          isCustom: food.isCustom || false,
+          userId: food.userId
+        })
+
         setNewFood({
           name: '', calories: '', protein: '', carbs: '', fat: '', fiber: '', sodium: '', category: '', servingSizeG: '100'
         })
@@ -137,7 +197,49 @@ export function FoodList() {
     }
   }
 
-  const filteredFoods = foods.filter(food => {
+  const handleAISearch = async () => {
+    if (!searchQuery.trim()) return
+    
+    setIsAISearching(true)
+    showIsland("L'IA Gemini analyse votre aliment...", "syncing", 3000)
+    
+    try {
+      const result = await parseMealWithAI(searchQuery)
+      
+      if (result.success && result.foods) {
+        // Dans la liste globale, on ajoute simplement tous les aliments trouvés
+        setFoods(prev => [...result.foods, ...prev])
+        
+        // Sauvegarder chaque aliment dans le cache offline
+        for (const food of result.foods) {
+          await saveOfflineFood({
+            id: food.id,
+            name: food.name,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            servingSizeG: food.servingSizeG,
+            category: food.category || 'Autres',
+            isCustom: food.isCustom || false,
+            userId: food.userId
+          })
+        }
+
+        showIsland(`${result.foods.length} aliment(s) ajouté(s) via l'IA !`, "success")
+        setSearchQuery('')
+      } else {
+        showIsland(result.error || "Une erreur est survenue", "error")
+      }
+    } catch (error) {
+      console.error('AI search error:', error)
+      showIsland("Erreur lors de la recherche IA", "error")
+    } finally {
+      setIsAISearching(false)
+    }
+  }
+
+  const filteredFoods = displayFoods.filter(food => {
     const matchesSearch = food.name.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesCategory = !selectedCategory || food.category === selectedCategory
     
@@ -161,7 +263,7 @@ export function FoodList() {
   return (
     <div className="space-y-6">
       {/* Search Bar */}
-      <div className="relative">
+      <div className="relative group">
         <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -172,8 +274,28 @@ export function FoodList() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Rechercher un aliment..."
-          className="w-full pl-12 pr-4 py-4 bg-white border border-gray-50 rounded-[1.5rem] shadow-sm text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder:text-gray-300"
+          className="w-full pl-12 pr-14 py-4 bg-white border border-gray-50 rounded-[1.5rem] shadow-sm text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder:text-gray-300 transition-all"
         />
+        
+        {/* Gemini AI Button in Search Bar */}
+        {searchQuery && (
+          <button
+            onClick={handleAISearch}
+            disabled={isAISearching}
+            className={`absolute right-2 inset-y-2 px-3 rounded-xl flex items-center justify-center transition-all ${
+              isAISearching 
+                ? 'bg-blue-50 text-blue-300' 
+                : 'bg-blue-50 text-blue-600 hover:bg-blue-100 active:scale-95'
+            }`}
+            title="Rechercher avec Gemini AI"
+          >
+            {isAISearching ? (
+              <div className="w-5 h-5 border-2 border-blue-200 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <span className="text-xl">✨</span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Categories */}
@@ -369,9 +491,10 @@ export function FoodList() {
             <p className="text-gray-400 text-sm">
               {isFilterFavorites 
                 ? "Vous n'avez pas encore d'aliments favoris." 
-                : "Essayez de modifier vos critères de recherche."}
+                : "L'aliment n'est pas dans notre base de données."}
             </p>
           </div>
+          
           {isFilterFavorites && (
             <button 
               onClick={() => setIsFilterFavorites(false)}

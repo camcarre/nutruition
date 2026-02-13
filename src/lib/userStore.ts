@@ -35,7 +35,12 @@ export function getUserSnapshot() {
 
   try {
     const parsed = JSON.parse(raw) as Partial<NonNullable<User>> | null
-    lastParsed = parsed && typeof parsed === 'object' ? (parsed as NonNullable<User>) : null
+    if (parsed && typeof parsed === 'object' && parsed.id) {
+      lastParsed = parsed as NonNullable<User>
+    } else {
+      lastParsed = null
+      return null
+    }
     
     // Sync to IndexedDB in background
     if (lastParsed && lastParsed.id) {

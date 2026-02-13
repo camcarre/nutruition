@@ -24,8 +24,7 @@ export async function addMealWithSync(meal: OfflineMeal) {
   // 2. Tenter la sauvegarde sur le serveur si en ligne
   if (typeof navigator !== 'undefined' && navigator.onLine) {
     try {
-      const userId = meal.id.split('_')[0];
-      await saveMeal(userId, {
+      await saveMeal(meal.userId, {
         mealType: meal.mealType,
         date: meal.date,
         foods: meal.items,
@@ -41,7 +40,7 @@ export async function addMealWithSync(meal: OfflineMeal) {
       await addToSyncQueue({
         type: 'ADD_MEAL',
         data: {
-          userId: meal.id.split('_')[0],
+          userId: meal.userId,
           localId: meal.id,
           mealData: {
             mealType: meal.mealType,
@@ -61,7 +60,7 @@ export async function addMealWithSync(meal: OfflineMeal) {
     await addToSyncQueue({
       type: 'ADD_MEAL',
       data: {
-        userId: meal.id.split('_')[0],
+        userId: meal.userId,
         localId: meal.id,
         mealData: {
           mealType: meal.mealType,

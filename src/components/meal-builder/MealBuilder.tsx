@@ -10,8 +10,9 @@ import {
   getFoods
 } from '@/app/actions/nutrition'
 import { addMealWithSync, addFavoriteWithSync, deleteFavoriteWithSync } from '@/lib/syncService'
-import { getOfflineFavorites, saveOfflineFavorite, getOfflineMeals, saveOfflineMeal } from '@/lib/offlineDb'
+import { getOfflineFavorites, saveOfflineFavorite, getOfflineMeals, saveOfflineMeal, getOfflineFoods, saveOfflineFood } from '@/lib/offlineDb'
 import { deleteFavoriteMeal as deleteFavoriteFromDB, getMealsByDate } from '@/app/actions/nutrition'
+import { parseMealWithAI } from '@/app/actions/ai'
 import { 
   format, 
   addDays, 
@@ -38,6 +39,7 @@ interface Food {
   carbs: number
   fat: number
   servingSizeG: number
+  category?: string
 }
 
 interface MealFood extends Food {
@@ -61,8 +63,18 @@ interface FavoriteMeal {
   createdAt?: string
 }
 
+interface DailyTotals {
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+}
+
 type TDEEStorageResult = {
   targetCalories: number
+  protein: number
+  carbs: number
+  fat: number
   mealDistribution?: {
     breakfast?: number
     lunch?: number
@@ -101,9 +113,113 @@ export function MealBuilder() {
    const [availableFoods, setAvailableFoods] = useState<Food[]>([])
    const [favoriteMeals, setFavoriteMeals] = useState<FavoriteMeal[]>([])
    const [recentMeals, setRecentMeals] = useState<any[]>([])
-   const [todayTotalCalories, setTodayTotalCalories] = useState(0)
+   const [todayTotals, setTodayTotals] = useState<DailyTotals>({
+     calories: 0,
+     protein: 0,
+     carbs: 0,
+     fat: 0
+   })
    const [isLoading, setIsLoading] = useState(true)
    const [isLoadingFavorites, setIsLoadingFavorites] = useState(false)
+   const [isAISearching, setIsAISearching] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recognition, setRecognition] = useState<any>(null)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      const recognitionInstance = new SpeechRecognition()
+      recognitionInstance.continuous = false
+      recognitionInstance.interimResults = false
+      recognitionInstance.lang = 'fr-FR'
+
+      recognitionInstance.onresult = async (event: any) => {
+        const transcript = event.results[0][0].transcript
+        console.log('Transcript:', transcript)
+        setIsRecording(false)
+        await handleVoiceMealAnalysis(transcript)
+      }
+
+      recognitionInstance.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error)
+        setIsRecording(false)
+        showIsland("Erreur lors de la reconnaissance vocale", "error")
+      }
+
+      recognitionInstance.onend = () => {
+        setIsRecording(false)
+      }
+
+      setRecognition(recognitionInstance)
+    }
+  }, [])
+
+  const handleVoiceMealAnalysis = async (text: string) => {
+    setIsAISearching(true)
+    showIsland("L'IA Gemini analyse votre repas...", "syncing", 4000)
+    
+    try {
+      const result = await parseMealWithAI(text)
+      
+      if (result.success && result.foods) {
+        // Pour la voix, on ajoute toujours au repas (add_meal)
+        const newFoods = result.foods.map((f: any) => {
+          const quantityG = f.quantityG || 100
+          return {
+            ...f,
+            quantityG,
+            totalCalories: (f.calories * quantityG) / 100,
+            totalProtein: (f.protein * quantityG) / 100,
+            totalCarbs: (f.carbs * quantityG) / 100,
+            totalFat: (f.fat * quantityG) / 100
+          }
+        })
+        
+        setFoods(prev => [...prev, ...newFoods])
+        
+        // Sauvegarder chaque aliment dans le cache offline
+        for (const food of result.foods) {
+          await saveOfflineFood({
+            id: food.id,
+            name: food.name,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            servingSizeG: food.servingSizeG,
+            category: food.category || 'Autres',
+            isCustom: food.isCustom || false,
+            userId: food.userId
+          })
+        }
+        
+        showIsland(`${result.foods.length} aliments ajoutés via l'IA !`, "success")
+        setShowFoodSearch(false)
+      } else {
+        showIsland(result.error || "Une erreur est survenue", "error")
+      }
+    } catch (error) {
+      console.error('Voice analysis error:', error)
+      showIsland("Erreur lors de l'analyse IA", "error")
+    } finally {
+      setIsAISearching(false)
+    }
+  }
+
+  const toggleRecording = () => {
+    if (!recognition) {
+      showIsland("La reconnaissance vocale n'est pas supportée par votre navigateur", "error")
+      return
+    }
+
+    if (isRecording) {
+      recognition.stop()
+    } else {
+      setIsRecording(true)
+      recognition.start()
+      showIsland("Écoute en cours... Dites ce que vous avez mangé", "syncing", 3000)
+    }
+  }
    const [showFavorites, setShowFavorites] = useState(false)
    const [mealName, setMealName] = useState('')
    const [showSaveModal, setShowSaveModal] = useState(false)
@@ -134,16 +250,21 @@ export function MealBuilder() {
       
       try {
         // Reset local state before fetching
-        setTodayTotalCalories(0)
+        setTodayTotals({ calories: 0, protein: 0, carbs: 0, fat: 0 })
         setRecentMeals([])
 
         // 1. Tenter de charger depuis IndexedDB d'abord (cache/offline)
-         const [offlineFavs, offlineMeals] = await Promise.all([
-           getOfflineFavorites(),
-           getOfflineMeals()
-         ])
+        const [offlineFavs, offlineMeals, offlineFoods] = await Promise.all([
+          getOfflineFavorites(),
+          getOfflineMeals(),
+          getOfflineFoods()
+        ])
 
-         if (offlineFavs.length > 0) {
+        if (offlineFoods.length > 0) {
+          setAvailableFoods(offlineFoods as any)
+        }
+
+        if (offlineFavs.length > 0) {
            const mappedOfflineFavs: FavoriteMeal[] = offlineFavs.map((f: any) => ({
              id: f.id,
              name: f.name,
@@ -161,10 +282,15 @@ export function MealBuilder() {
          }
 
          if (offlineMeals.length > 0) {
-           // Filtrer les repas d'aujourd'hui pour le total des calories
+           // Filtrer les repas d'aujourd'hui pour le total des nutriments
            const todayMeals = offlineMeals.filter((m: any) => m.date === selectedDate)
-           const todayCal = todayMeals.reduce((acc: number, m: any) => acc + m.totalCalories, 0)
-           setTodayTotalCalories(todayCal)
+           const totals = todayMeals.reduce((acc: DailyTotals, m: any) => ({
+             calories: acc.calories + m.totalCalories,
+             protein: acc.protein + m.totalProtein,
+             carbs: acc.carbs + m.totalCarbs,
+             fat: acc.fat + m.totalFat
+           }), { calories: 0, protein: 0, carbs: 0, fat: 0 })
+           setTodayTotals(totals)
 
            // 10 derniers repas
            const sortedMeals = [...offlineMeals].sort((a: any, b: any) => 
@@ -198,10 +324,27 @@ export function MealBuilder() {
            setFavoriteMeals(mappedFavs)
           setAvailableFoods(dbFoods as any)
 
+          // Mettre à jour le cache local (Aliments)
+          for (const food of (dbFoods as any)) {
+            await saveOfflineFood({
+              id: food.id,
+              name: food.name,
+              calories: food.calories,
+              protein: food.protein,
+              carbs: food.carbs,
+              fat: food.fat,
+              servingSizeG: food.servingSizeG,
+              category: food.category || 'Autres',
+              isCustom: food.isCustom,
+              userId: food.userId
+            })
+          }
+
           // Mettre à jour le cache local (Favoris)
            for (const fav of mappedFavs) {
              await saveOfflineFavorite({
                id: fav.id,
+               userId: user.id,
                name: fav.name,
                mealType: fav.mealType,
                items: fav.foods.map(food => ({
@@ -228,6 +371,7 @@ export function MealBuilder() {
           for (const meal of dayMeals) {
             await saveOfflineMeal({
               id: meal.id,
+              userId: user.id,
               name: meal.mealType,
               mealType: meal.mealType,
               date: format(new Date(meal.date), 'yyyy-MM-dd'),
@@ -243,10 +387,15 @@ export function MealBuilder() {
           // Recharger tout depuis IndexedDB pour avoir la version fusionnée (offline + online)
           const finalOfflineMeals = await getOfflineMeals()
           
-          // Calculer les calories d'aujourd'hui
+          // Calculer les nutriments d'aujourd'hui
           const todayMeals = finalOfflineMeals.filter((m: any) => m.date === selectedDate)
-          const todayCal = todayMeals.reduce((acc: number, m: any) => acc + m.totalCalories, 0)
-          setTodayTotalCalories(todayCal)
+          const totals = todayMeals.reduce((acc: DailyTotals, m: any) => ({
+            calories: acc.calories + m.totalCalories,
+            protein: acc.protein + m.totalProtein,
+            carbs: acc.carbs + m.totalCarbs,
+            fat: acc.fat + m.totalFat
+          }), { calories: 0, protein: 0, carbs: 0, fat: 0 })
+          setTodayTotals(totals)
 
           // 10 derniers repas
           const sortedMeals = [...finalOfflineMeals].sort((a: any, b: any) => 
@@ -280,17 +429,21 @@ export function MealBuilder() {
 
   // Default foods if DB is empty
   const defaultFoods: Food[] = [
-    { id: '1', name: 'Oeuf entier', calories: 155, protein: 13, carbs: 1, fat: 11, servingSizeG: 100 },
-    { id: '2', name: 'Avoine', calories: 389, protein: 17, carbs: 66, fat: 7, servingSizeG: 100 },
-    { id: '3', name: 'Lait demi-écrémé', calories: 46, protein: 3.4, carbs: 4.8, fat: 1.7, servingSizeG: 100 },
-    { id: '4', name: 'Poulet grillé', calories: 165, protein: 31, carbs: 0, fat: 3.6, servingSizeG: 100 },
-    { id: '5', name: 'Riz blanc cuit', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, servingSizeG: 100 },
-    { id: '6', name: 'Brocoli cuit', calories: 35, protein: 2.4, carbs: 7.2, fat: 0.4, servingSizeG: 100 },
-    { id: '7', name: 'Pomme', calories: 52, protein: 0.3, carbs: 14, fat: 0.2, servingSizeG: 100 },
-    { id: '8', name: 'Banane', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, servingSizeG: 100 },
+    { id: '1', name: 'Oeuf entier', calories: 155, protein: 13, carbs: 1, fat: 11, servingSizeG: 100, category: 'Protéines' },
+    { id: '2', name: 'Avoine', calories: 389, protein: 17, carbs: 66, fat: 7, servingSizeG: 100, category: 'Céréales' },
+    { id: '3', name: 'Lait demi-écrémé', calories: 46, protein: 3.4, carbs: 4.8, fat: 1.7, servingSizeG: 100, category: 'Produits laitiers' },
+    { id: '4', name: 'Poulet grillé', calories: 165, protein: 31, carbs: 0, fat: 3.6, servingSizeG: 100, category: 'Protéines' },
+    { id: '5', name: 'Riz blanc cuit', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, servingSizeG: 100, category: 'Céréales' },
+    { id: '6', name: 'Brocoli cuit', calories: 35, protein: 2.4, carbs: 7.2, fat: 0.4, servingSizeG: 100, category: 'Légumes' },
+    { id: '7', name: 'Pomme', calories: 52, protein: 0.3, carbs: 14, fat: 0.2, servingSizeG: 100, category: 'Fruits' },
+    { id: '8', name: 'Banane', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, servingSizeG: 100, category: 'Fruits' },
   ]
 
-  const displayFoods = availableFoods.length > 0 ? availableFoods : defaultFoods
+  // Fusionner les aliments de la BDD avec les aliments par défaut (sans doublons par nom)
+  const displayFoods = [
+    ...availableFoods,
+    ...defaultFoods.filter(df => !availableFoods.some(f => f.name.toLowerCase() === df.name.toLowerCase()))
+  ]
 
 
   const addFood = (food: Food, quantityG: number) => {
@@ -354,11 +507,30 @@ export function MealBuilder() {
   )
 
   const saveAsFavorite = async () => {
-    if (!mealName.trim() || foods.length === 0 || !user?.id) return
+    // Tentative de récupération de l'ID utilisateur de secours si le store est en retard
+    let currentUserId = user?.id
+    if (!currentUserId && typeof window !== 'undefined') {
+      const savedUser = localStorage.getItem('user')
+      if (savedUser) {
+        try {
+          const parsed = JSON.parse(savedUser)
+          currentUserId = parsed.id
+        } catch (e) {}
+      }
+    }
+
+    if (!mealName.trim() || foods.length === 0 || !currentUserId) {
+      if (!currentUserId) showIsland('Utilisateur non identifié', 'error', 3000)
+      if (foods.length === 0) showIsland('Ajoutez des aliments d\'abord', 'error', 3000)
+      return
+    }
 
     setIsSaving(true)
     try {
-      const favoriteData = {
+      const favoriteId = `${currentUserId}_fav_${Date.now()}`
+      const newFavorite = {
+        id: favoriteId,
+        userId: currentUserId,
         name: mealName,
         mealType,
         items: foods.map(f => ({
@@ -368,42 +540,41 @@ export function MealBuilder() {
         totalCalories: Math.round(totalNutrients.calories),
         totalProtein: Math.round(totalNutrients.protein * 10) / 10,
         totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
-        totalFat: Math.round(totalNutrients.fat * 10) / 10
+        totalFat: Math.round(totalNutrients.fat * 10) / 10,
+        synced: false
       }
 
-      await addFavoriteWithSync({
-        id: `${user.id}_fav_${Date.now()}`,
+      // Sauvegarder avec synchro (gère l'offline)
+      await addFavoriteWithSync(newFavorite, currentUserId)
+
+      // Mettre à jour l'état local immédiatement pour un retour rapide
+      const mappedNewFav: FavoriteMeal = {
+        id: favoriteId,
         name: mealName,
         mealType,
-        items: favoriteData.items,
-        totalCalories: favoriteData.totalCalories,
-        totalProtein: favoriteData.totalProtein,
-        totalCarbs: favoriteData.totalCarbs,
-        totalFat: favoriteData.totalFat,
-        synced: false
-      }, user.id)
-
-      const favs = await getFavoriteMeals(user.id)
-      const mappedFavs: FavoriteMeal[] = favs.map((f: any) => ({
-        id: f.id,
-        name: f.name,
-        mealType: f.mealType as any,
-        totalCalories: f.totalCalories,
-        totalProtein: f.totalProtein,
-        totalCarbs: f.totalCarbs,
-        totalFat: f.totalFat,
-        foods: f.items.map((item: any) => ({
-          ...item.food,
-          quantityG: item.quantityG
+        totalCalories: newFavorite.totalCalories,
+        totalProtein: newFavorite.totalProtein,
+        totalCarbs: newFavorite.totalCarbs,
+        totalFat: newFavorite.totalFat,
+        foods: foods.map(f => ({
+          ...f,
+          id: f.id,
+          name: f.name,
+          calories: f.calories,
+          protein: f.protein,
+          carbs: f.carbs,
+          fat: f.fat,
+          servingSizeG: f.servingSizeG
         }))
-      }))
-      setFavoriteMeals(mappedFavs)
+      }
 
+      setFavoriteMeals(prev => [mappedNewFav, ...prev])
       setMealName('')
       setShowSaveModal(false)
-      showIsland('Ajouté aux favoris !', 'success', 3000)
+      showIsland('Plat ajouté aux favoris !', 'success', 3000)
     } catch (error) {
       console.error('Error saving favorite:', error)
+      showIsland('Erreur lors de la sauvegarde', 'error', 3000)
     } finally {
       setIsSaving(false)
     }
@@ -439,47 +610,62 @@ export function MealBuilder() {
   }
 
   const handleSaveMeal = async () => {
-    if (foods.length === 0 || !user?.id) return
+    // Tentative de récupération de l'ID utilisateur de secours
+    let currentUserId = user?.id
+    if (!currentUserId && typeof window !== 'undefined') {
+      const savedUser = localStorage.getItem('user')
+      if (savedUser) {
+        try {
+          const parsed = JSON.parse(savedUser)
+          currentUserId = parsed.id
+        } catch (e) {}
+      }
+    }
+
+    if (foods.length === 0 || !currentUserId) {
+      if (!currentUserId) showIsland('Utilisateur non identifié', 'error', 3000)
+      return
+    }
 
     setIsSaving(true)
     try {
       const mealData = {
-        id: `${user.id}_meal_${Date.now()}`,
-        name: mealTypeLabels[mealType].label,
+        userId: currentUserId,
+        date: new Date(selectedDate),
         mealType,
-        date: selectedDate,
+        totalCalories: Math.round(totalNutrients.calories),
+        totalProtein: Math.round(totalNutrients.protein * 10) / 10,
+        totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
+        totalFat: Math.round(totalNutrients.fat * 10) / 10,
         items: foods.map(f => ({
-          id: f.id,
+          foodId: f.id,
           quantityG: f.quantityG,
           totalCalories: f.totalCalories,
           totalProtein: f.totalProtein,
           totalCarbs: f.totalCarbs,
           totalFat: f.totalFat
-        })),
-        totalCalories: Math.round(totalNutrients.calories),
-        totalProtein: Math.round(totalNutrients.protein * 10) / 10,
-        totalCarbs: Math.round(totalNutrients.carbs * 10) / 10,
-        totalFat: Math.round(totalNutrients.fat * 10) / 10,
-        synced: false
+        }))
       }
 
-      await addMealWithSync(mealData)
-      
-      // Mettre à jour les repas récents localement
-      setRecentMeals(prev => {
-        const updated = [mealData, ...prev]
-        return updated.slice(0, 10)
+      await addMealWithSync({
+        ...mealData,
+        id: `meal_${Date.now()}`,
+        name: mealTypeLabels[mealType].label,
+        date: selectedDate,
+        synced: false
       })
 
-      // Mettre à jour les calories du jour si c'est la date sélectionnée
-      if (mealData.date === selectedDate) {
-        setTodayTotalCalories(prev => prev + mealData.totalCalories)
-      }
-
       setFoods([])
+      setTodayTotals(prev => ({
+        calories: prev.calories + mealData.totalCalories,
+        protein: prev.protein + mealData.totalProtein,
+        carbs: prev.carbs + mealData.totalCarbs,
+        fat: prev.fat + mealData.totalFat
+      }))
       showIsland('Repas enregistré !', 'success', 3000)
     } catch (error) {
       console.error('Error saving meal:', error)
+      showIsland('Erreur lors de l\'enregistrement', 'error', 3000)
     } finally {
       setIsSaving(false)
     }
@@ -506,12 +692,84 @@ export function MealBuilder() {
     setSelectedDate(format(nextDay, 'yyyy-MM-dd'))
   }
 
-  const filteredFoods = availableFoods.filter(food =>
+  const handleAISearch = async () => {
+    if (!searchQuery.trim()) return
+    
+    setIsAISearching(true)
+    showIsland("L'IA Gemini analyse votre demande...", "syncing", 3000)
+    
+    try {
+      const result = await parseMealWithAI(searchQuery)
+      
+      if (result.success && result.foods) {
+        if (result.intent === 'add_meal') {
+          // Ajout direct au repas
+          const newFoods = result.foods.map((f: any) => {
+            const quantityG = f.quantityG || 100
+            return {
+              ...f,
+              quantityG,
+              totalCalories: (f.calories * quantityG) / 100,
+              totalProtein: (f.protein * quantityG) / 100,
+              totalCarbs: (f.carbs * quantityG) / 100,
+              totalFat: (f.fat * quantityG) / 100
+            }
+          })
+          
+          setFoods(prev => [...prev, ...newFoods])
+          showIsland(`${result.foods.length} aliments ajoutés au repas !`, "success")
+          setSearchQuery('')
+          setShowFoodSearch(false)
+        } else {
+          // Ajout aux résultats de recherche
+          const food = result.foods[0] as any
+          if (food) {
+            setAvailableFoods(prev => [food, ...prev])
+            showIsland(`${food.name} trouvé par l'IA !`, "success")
+          } else {
+            showIsland("Aucun aliment trouvé", "error")
+          }
+        }
+        
+        // Sauvegarder dans le cache offline
+        for (const food of result.foods) {
+          await saveOfflineFood({
+            id: food.id,
+            name: food.name,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            servingSizeG: food.servingSizeG,
+            category: food.category || 'Autres',
+            isCustom: food.isCustom || false,
+            userId: food.userId
+          })
+        }
+      } else {
+        showIsland(result.error || "Une erreur est survenue", "error")
+      }
+    } catch (error) {
+      console.error('AI search error:', error)
+      showIsland("Erreur lors de la recherche IA", "error")
+    } finally {
+      setIsAISearching(false)
+    }
+  }
+
+  const filteredFoods = displayFoods.filter(food =>
     food.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const consumedCalories = todayTotalCalories + totalNutrients.calories
+  const consumedCalories = todayTotals.calories + totalNutrients.calories
   const targetCalories = typeof tdeeResult?.targetCalories === 'number' ? tdeeResult.targetCalories : 2560
+  const targetProtein = typeof tdeeResult?.protein === 'number' ? tdeeResult.protein : 150
+  const targetCarbs = typeof tdeeResult?.carbs === 'number' ? tdeeResult.carbs : 300
+  const targetFat = typeof tdeeResult?.fat === 'number' ? tdeeResult.fat : 70
+  
+  const consumedProtein = todayTotals.protein + totalNutrients.protein
+  const consumedCarbs = todayTotals.carbs + totalNutrients.carbs
+  const consumedFat = todayTotals.fat + totalNutrients.fat
   const mealDistribution = tdeeResult?.mealDistribution
   const computedMealTargetCalories =
     mealDistribution && typeof mealDistribution === 'object' ? (
@@ -616,16 +874,57 @@ export function MealBuilder() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider">
-              <span>{consumedCalories} kcal consommés</span>
-              <span>Reste: {remainingCalories} kcal</span>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider">
+                <span>{consumedCalories} kcal consommés</span>
+                <span>Reste: {remainingCalories} kcal</span>
+              </div>
+              <div className="h-2 bg-indigo-800/50 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-white rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${progressPercentage}%` }}
+                />
+              </div>
             </div>
-            <div className="h-2 bg-indigo-800/50 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-white rounded-full transition-all duration-500 ease-out"
-                style={{ width: `${progressPercentage}%` }}
-              />
+
+            <div className="grid grid-cols-3 gap-4 pt-2">
+              <div className="space-y-1">
+                <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                  <span>Protéines</span>
+                  <span>{Math.round(consumedProtein)}/{targetProtein}g</span>
+                </div>
+                <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-orange-400 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${Math.min((consumedProtein / targetProtein) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                  <span>Glucides</span>
+                  <span>{Math.round(consumedCarbs)}/{targetCarbs}g</span>
+                </div>
+                <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-blue-400 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${Math.min((consumedCarbs / targetCarbs) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                  <span>Lipides</span>
+                  <span>{Math.round(consumedFat)}/{targetFat}g</span>
+                </div>
+                <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-emerald-400 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${Math.min((consumedFat / targetFat) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -794,7 +1093,7 @@ export function MealBuilder() {
                 className="w-full bg-white border-2 border-[#1a1c2e] text-[#1a1c2e] py-4 rounded-2xl font-bold hover:bg-gray-50 transition-all flex items-center justify-center gap-2"
               >
                 <span>⭐</span>
-                Favoris
+                Sauvegarder le plat
               </button>
               <button
                 onClick={handleSaveMeal}
@@ -806,7 +1105,7 @@ export function MealBuilder() {
                 ) : (
                   <>
                     <span>✅</span>
-                    Valider
+                    Enregistrer le repas
                   </>
                 )}
               </button>
@@ -863,9 +1162,50 @@ export function MealBuilder() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Rechercher un aliment..."
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                className="w-full pl-12 pr-14 py-4 bg-gray-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                 autoFocus
               />
+              {/* AI & Voice Buttons */}
+              <div className="absolute inset-y-0 right-2 flex items-center gap-1">
+                {searchQuery && (
+                  <button
+                    onClick={handleAISearch}
+                    disabled={isAISearching}
+                    className={`px-3 py-2 rounded-xl flex items-center justify-center transition-all ${
+                      isAISearching 
+                        ? 'bg-blue-50 text-blue-300' 
+                        : 'bg-blue-50 text-blue-600 hover:bg-blue-100 active:scale-95'
+                    }`}
+                    title="Rechercher avec Gemini AI"
+                  >
+                    {isAISearching ? (
+                      <div className="w-5 h-5 border-2 border-blue-200 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <span className="text-xl">✨</span>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={toggleRecording}
+                  disabled={isAISearching}
+                  className={`p-2 rounded-xl transition-all ${
+                    isRecording 
+                      ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-200' 
+                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-indigo-500'
+                  }`}
+                  title="Parler pour ajouter un repas"
+                >
+                  {isRecording ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clipRule="evenodd" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-3 pb-8">
@@ -915,10 +1255,14 @@ export function MealBuilder() {
                 </button>
                 <button
                   onClick={saveAsFavorite}
-                  disabled={!mealName.trim()}
-                  className="flex-1 py-4 bg-[#1a1c2e] text-white font-bold rounded-2xl shadow-lg shadow-gray-200 hover:bg-[#2a2d4a] disabled:opacity-50 transition-all"
+                  disabled={!mealName.trim() || isSaving}
+                  className="flex-1 py-4 bg-[#1a1c2e] text-white font-bold rounded-2xl shadow-lg shadow-gray-200 hover:bg-[#2a2d4a] disabled:opacity-50 transition-all flex items-center justify-center gap-2"
                 >
-                  Enregistrer
+                  {isSaving ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    'Enregistrer'
+                  )}
                 </button>
               </div>
             </div>

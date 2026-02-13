@@ -1,10 +1,24 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'nutrition-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+
+export interface OfflineFood {
+  id: string;
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  servingSizeG: number;
+  category: string;
+  isCustom: boolean;
+  userId?: string | null;
+}
 
 export interface OfflineMeal {
   id: string;
+  userId: string;
   name: string;
   mealType: string;
   date: string;
@@ -18,6 +32,7 @@ export interface OfflineMeal {
 
 export interface OfflineFavorite {
   id: string;
+  userId: string;
   name: string;
   mealType: string;
   items: any[];
@@ -67,6 +82,11 @@ if (typeof window !== 'undefined') {
       // File d'attente de synchronisation
       if (!db.objectStoreNames.contains('syncQueue')) {
         db.createObjectStore('syncQueue', { keyPath: 'id', autoIncrement: true });
+      }
+
+      // Stockage des aliments
+      if (!db.objectStoreNames.contains('foods')) {
+        db.createObjectStore('foods', { keyPath: 'id' });
       }
     },
   });
@@ -142,4 +162,17 @@ export async function removeFromSyncQueue(id: number) {
   const db = await getDB();
   if (!db) return;
   await db.delete('syncQueue', id);
+}
+
+// Fonctions d'aide pour les aliments
+export async function saveOfflineFood(food: OfflineFood) {
+  const db = await getDB();
+  if (!db) return;
+  await db.put('foods', food);
+}
+
+export async function getOfflineFoods() {
+  const db = await getDB();
+  if (!db) return [];
+  return db.getAll('foods');
 }
