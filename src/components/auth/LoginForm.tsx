@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { getOrCreateUser } from '@/app/actions/nutrition'
+import { loginUser } from '@/app/actions/nutrition'
 import { showIsland } from '@/lib/uiStore'
 
 export function LoginForm() {
@@ -19,13 +19,19 @@ export function LoginForm() {
     setIsLoading(true)
     
     try {
-      const user = await getOrCreateUser(formData.email)
-      if (user) {
+      const result = await loginUser(formData.email, formData.password)
+      
+      if (result.error) {
+        showIsland(result.error, 'error', 3000)
+        return
+      }
+
+      if (result.user) {
         const userToSave = { 
-          id: user.id,
-          email: user.email,
-          photoUrl: user.photoUrl,
-          targetCalories: user.targetCalories
+          id: result.user.id,
+          email: result.user.email,
+          photoUrl: result.user.photoUrl,
+          targetCalories: result.user.targetCalories
         }
         localStorage.setItem('user', JSON.stringify(userToSave))
         window.dispatchEvent(new Event('nutruition:user'))
@@ -33,8 +39,6 @@ export function LoginForm() {
         
         // Force immediate redirection
         router.replace('/')
-      } else {
-        showIsland('Utilisateur non trouvé', 'error', 3000)
       }
     } catch (error) {
       console.error('Login error:', error)

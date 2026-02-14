@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { getOrCreateUser } from '@/app/actions/nutrition'
+import { registerUser } from '@/app/actions/nutrition'
 import { showIsland } from '@/lib/uiStore'
 
 export function RegisterForm() {
@@ -28,13 +28,20 @@ export function RegisterForm() {
     setIsLoading(true)
     
     try {
-      const user = await getOrCreateUser(formData.email)
-      if (user) {
+      const result = await registerUser(formData.email, formData.password)
+      
+      if (result.error) {
+        setError(result.error)
+        showIsland(result.error, 'error', 3000)
+        return
+      }
+
+      if (result.user) {
         const userToSave = { 
-          id: user.id,
-          email: user.email,
-          photoUrl: user.photoUrl,
-          targetCalories: user.targetCalories
+          id: result.user.id,
+          email: result.user.email,
+          photoUrl: result.user.photoUrl,
+          targetCalories: result.user.targetCalories
         }
         localStorage.setItem('user', JSON.stringify(userToSave))
         window.dispatchEvent(new Event('nutruition:user'))

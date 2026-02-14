@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useSyncExternalStore } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useSyncExternalStore, useEffect } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import { subscribeUser, getUserSnapshot, getUserServerSnapshot, type User } from '@/lib/userStore'
 import { ReminderSettings } from './ReminderSettings'
 
 export function Header() {
   const router = useRouter()
+  const pathname = usePathname()
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showReminders, setShowReminders] = useState(false)
   const user = useSyncExternalStore(
@@ -21,8 +22,14 @@ export function Header() {
     router.push('/login')
   }
 
-  const userInitial = user?.email ? user.email[0].toUpperCase() : 'N'
-  const username = user?.email ? user.email.split('@')[0] : 'Invité'
+  const userInitial = user?.email ? user.email[0].toUpperCase() : '?'
+  const username = user?.email ? user.email.split('@')[0] : 'Chargement...'
+
+  useEffect(() => {
+    if (!user && !pathname?.includes('/login') && !pathname?.includes('/register')) {
+      router.replace('/login')
+    }
+  }, [user, router, pathname])
 
   return (
     <div className="flex justify-between items-center mb-8 relative">

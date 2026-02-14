@@ -5,22 +5,51 @@ import { revalidatePath } from 'next/cache'
 
 // --- Users ---
 
-export async function getOrCreateUser(email: string) {
+export async function loginUser(email: string, password?: string) {
   try {
-    let user = await prisma.user.findFirst({
-      where: { email }
+    const normalizedEmail = email.toLowerCase().trim()
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail }
     })
 
     if (!user) {
-      user = await prisma.user.create({
-        data: { email }
-      })
+      return { error: 'Utilisateur non trouvé' }
     }
 
-    return user
+    if (user.password && user.password !== password) {
+      return { error: 'Mot de passe incorrect' }
+    }
+
+    return { user }
   } catch (error) {
-    console.error('Error in getOrCreateUser:', error)
-    return null
+    console.error('Error in loginUser:', error)
+    return { error: 'Erreur lors de la connexion' }
+  }
+}
+
+export async function registerUser(email: string, password?: string) {
+  try {
+    const normalizedEmail = email.toLowerCase().trim()
+    // Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    })
+
+    if (existingUser) {
+      return { error: 'Cet email est déjà utilisé' }
+    }
+
+    const user = await prisma.user.create({
+      data: { 
+        email: normalizedEmail,
+        password 
+      }
+    })
+
+    return { user }
+  } catch (error) {
+    console.error('Error in registerUser:', error)
+    return { error: 'Erreur lors de l\'inscription' }
   }
 }
 

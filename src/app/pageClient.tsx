@@ -1,6 +1,9 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { useEffect, useSyncExternalStore } from 'react'
+import { useRouter } from 'next/navigation'
+import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
 
 const Header = dynamic(
   () => import('@/components/layout/Header').then((m) => m.Header),
@@ -13,6 +16,21 @@ const Calculator = dynamic(
 )
 
 export function HomeClient() {
+  const router = useRouter()
+  const user = useSyncExternalStore(
+    subscribeUser,
+    getUserSnapshot,
+    getUserServerSnapshot
+  )
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !user) {
+      router.replace('/login')
+    }
+  }, [user, router])
+
+  if (!user) return null
+
   return (
     <div className="bg-gray-50 px-4 pt-6 pb-6 min-h-screen animate-in fade-in slide-in-from-bottom-4 duration-700">
       <Header />
