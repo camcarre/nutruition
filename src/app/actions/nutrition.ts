@@ -47,9 +47,13 @@ export async function registerUser(email: string, password?: string) {
     })
 
     return { user }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in registerUser:', error)
-    return { error: 'Erreur lors de l\'inscription' }
+    // Log more details about the error
+    if (error.code === 'P1001') {
+      return { error: 'Impossible de se connecter à la base de données. Vérifiez votre connexion internet.' }
+    }
+    return { error: `Erreur lors de l'inscription: ${error.message || 'Erreur inconnue'}` }
   }
 }
 

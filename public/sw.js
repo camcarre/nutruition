@@ -1,5 +1,12 @@
-const CACHE_NAME = "nutrition-v1"; 
-const urlsToCache = ["/"]; 
+const CACHE_NAME = "nutrition-v2"; 
+const urlsToCache = [
+  "/",
+  "/manifest.json",
+  "/icons/icon-192x192.png",
+  "/icons/icon-512x512.png",
+  "/login",
+  "/register"
+]; 
 
 self.addEventListener("install", event => { 
   event.waitUntil( 
@@ -25,9 +32,18 @@ self.addEventListener("notificationclick", event => {
 });
 
 self.addEventListener("fetch", event => { 
+  // Skip cross-origin requests
+  if (!event.request.url.startsWith(self.location.origin)) return;
+
   event.respondWith( 
     caches.match(event.request).then(response => { 
-      return response || fetch(event.request); 
+      if (response) {
+        return response;
+      }
+      return fetch(event.request).catch(err => {
+        console.error("SW fetch failed:", err);
+        // Don't throw, just let it fail naturally or return a fallback
+      });
     }) 
   ); 
 });
