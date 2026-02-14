@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState, useSyncExternalStore } from 'react'
-import { subscribeUser, getUserSnapshot, getUserServerSnapshot } from '@/lib/userStore'
+import { useMemo, useState, useSyncExternalStore, useEffect } from 'react'
+import { subscribeUser, getUserSnapshot, getUserServerSnapshot, updateUserLocal } from '@/lib/userStore'
 import { showIsland } from '@/lib/uiStore'
 import { updateUserCalories } from '@/app/actions/nutrition'
 
@@ -195,6 +195,19 @@ export function Calculator() {
     }
   })
 
+  // Synchronisation avec les données de l'utilisateur si connecté
+  useEffect(() => {
+    if (user?.id && result?.targetCalories) {
+      if (user.targetCalories !== result.targetCalories) {
+        updateUserCalories(user.id, result.targetCalories).then((updatedUser) => {
+          if (updatedUser) {
+            updateUserLocal(updatedUser as any)
+          }
+        })
+      }
+    }
+  }, [user?.id, user?.targetCalories, result?.targetCalories])
+
   const activityLabel = useMemo(() => {
     const option = ACTIVITY_OPTIONS.find((o) => o.value === form.activityLevel)
     return option?.label ?? 'Sélectionner'
@@ -318,7 +331,11 @@ export function Calculator() {
 
     // Sync with DB if user is logged in
     if (user?.id) {
-      updateUserCalories(user.id, resultData.targetCalories)
+      updateUserCalories(user.id, resultData.targetCalories).then((updatedUser) => {
+        if (updatedUser) {
+          updateUserLocal(updatedUser as any)
+        }
+      })
     }
   }
 

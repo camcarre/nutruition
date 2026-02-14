@@ -48,7 +48,7 @@ export interface OfflineUser {
   email: string;
   name?: string;
   photoUrl?: string;
-  dailyCalories?: number;
+  targetCalories?: number;
   synced: boolean;
 }
 

@@ -7,6 +7,7 @@ import { SyncListener } from '@/components/pwa/SyncListener'
 import { ReminderListener } from '@/components/pwa/ReminderListener'
 import { SplashScreen } from '@/components/layout/SplashScreen'
 import { DynamicIsland } from '@/components/layout/DynamicIsland'
+import { SwipeProvider } from '@/components/layout/SwipeProvider'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -56,9 +57,11 @@ export default function RootLayout({
         <SyncListener />
         <ReminderListener />
         <div className="min-h-screen max-w-mobile mx-auto bg-white">
-          <main className="pb-20">
-            {children}
-          </main>
+          <SwipeProvider>
+            <main className="pb-20">
+              {children}
+            </main>
+          </SwipeProvider>
           <MobileNav />
         </div>
       </body>

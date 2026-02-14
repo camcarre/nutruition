@@ -11,7 +11,7 @@ import {
 } from '@/app/actions/nutrition'
 import { addMealWithSync, addFavoriteWithSync, deleteFavoriteWithSync } from '@/lib/syncService'
 import { getOfflineFavorites, saveOfflineFavorite, getOfflineMeals, saveOfflineMeal, getOfflineFoods, saveOfflineFood } from '@/lib/offlineDb'
-import { deleteFavoriteMeal as deleteFavoriteFromDB, getMealsByDate } from '@/app/actions/nutrition'
+import { getMealsByDate } from '@/app/actions/nutrition'
 import { parseMealWithAI } from '@/app/actions/ai'
 import { 
   format, 
@@ -83,14 +83,6 @@ type TDEEStorageResult = {
   }
 }
 
-function stableHashBase36(input: string) {
-  let hash = 0
-  for (let i = 0; i < input.length; i++) {
-    hash = (hash * 31 + input.charCodeAt(i)) >>> 0
-  }
-  return hash.toString(36)
-}
-
 export function MealBuilder() {
   const searchParams = useSearchParams()
   const user = useSyncExternalStore(subscribeUser, getUserSnapshot, getUserServerSnapshot)
@@ -107,7 +99,22 @@ export function MealBuilder() {
      }
      return 'breakfast'
    })
-   const [foods, setFoods] = useState<MealFood[]>([])
+   const [foods, setFoods] = useState<MealFood[]>(() => {
+     if (typeof window === 'undefined') return []
+     try {
+       const saved = localStorage.getItem('draftMeal')
+       return saved ? JSON.parse(saved) : []
+     } catch {
+       return []
+     }
+   })
+
+   // Sauvegarder le repas en cours dans le cache local
+   useEffect(() => {
+     if (typeof window !== 'undefined') {
+       localStorage.setItem('draftMeal', JSON.stringify(foods))
+     }
+   }, [foods])
    const [searchQuery, setSearchQuery] = useState('')
    const [showFoodSearch, setShowFoodSearch] = useState(false)
    const [availableFoods, setAvailableFoods] = useState<Food[]>([])
@@ -120,7 +127,6 @@ export function MealBuilder() {
      fat: 0
    })
    const [isLoading, setIsLoading] = useState(true)
-   const [isLoadingFavorites, setIsLoadingFavorites] = useState(false)
    const [isAISearching, setIsAISearching] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [recognition, setRecognition] = useState<any>(null)
@@ -224,6 +230,7 @@ export function MealBuilder() {
    const [mealName, setMealName] = useState('')
    const [showSaveModal, setShowSaveModal] = useState(false)
    const [isSaving, setIsSaving] = useState(false)
+   const [viewMode, setViewMode] = useState<'day' | 'meal'>('day')
    const [tdeeResult] = useState<TDEEStorageResult | null>(() => {
      if (typeof window === 'undefined') return null
      try {
@@ -240,11 +247,9 @@ export function MealBuilder() {
    useEffect(() => {
      async function fetchData() {
       setIsLoading(true)
-      setIsLoadingFavorites(true)
       
       if (!user?.id) {
         setIsLoading(false)
-        setIsLoadingFavorites(false)
         return
       }
       
@@ -407,7 +412,6 @@ export function MealBuilder() {
          console.error('Error fetching data:', error)
        } finally {
          setIsLoading(false)
-         setIsLoadingFavorites(false)
        }
      }
      
@@ -655,6 +659,7 @@ export function MealBuilder() {
         synced: false
       })
 
+      localStorage.removeItem('draftMeal')
       setFoods([])
       setTodayTotals(prev => ({
         calories: prev.calories + mealData.totalCalories,
@@ -762,7 +767,7 @@ export function MealBuilder() {
   )
 
   const consumedCalories = todayTotals.calories + totalNutrients.calories
-  const targetCalories = typeof tdeeResult?.targetCalories === 'number' ? tdeeResult.targetCalories : 2560
+  const targetCalories = user?.targetCalories ?? (typeof tdeeResult?.targetCalories === 'number' ? tdeeResult.targetCalories : 2560)
   const targetProtein = typeof tdeeResult?.protein === 'number' ? tdeeResult.protein : 150
   const targetCarbs = typeof tdeeResult?.carbs === 'number' ? tdeeResult.carbs : 300
   const targetFat = typeof tdeeResult?.fat === 'number' ? tdeeResult.fat : 70
@@ -770,15 +775,30 @@ export function MealBuilder() {
   const consumedProtein = todayTotals.protein + totalNutrients.protein
   const consumedCarbs = todayTotals.carbs + totalNutrients.carbs
   const consumedFat = todayTotals.fat + totalNutrients.fat
+  
+  // Calcul des objectifs par repas avec fallback si non défini
   const mealDistribution = tdeeResult?.mealDistribution
-  const computedMealTargetCalories =
-    mealDistribution && typeof mealDistribution === 'object' ? (
-      mealType === 'breakfast' ? Math.round(mealDistribution.breakfast ?? NaN) :
-      mealType === 'lunch' ? Math.round(mealDistribution.lunch ?? NaN) :
-      mealType === 'dinner' ? Math.round(mealDistribution.dinner ?? NaN) :
-      Math.round(mealDistribution.snacks ?? NaN)
-    ) : NaN
-  const mealTargetCalories = Number.isFinite(computedMealTargetCalories) && computedMealTargetCalories > 0 ? computedMealTargetCalories : 640
+  const getMealTarget = () => {
+    if (mealDistribution) {
+      if (mealType === 'breakfast' && mealDistribution.breakfast) return mealDistribution.breakfast
+      if (mealType === 'lunch' && mealDistribution.lunch) return mealDistribution.lunch
+      if (mealType === 'dinner' && mealDistribution.dinner) return mealDistribution.dinner
+      if (mealType === 'snack' && mealDistribution.snacks) return mealDistribution.snacks
+    }
+    
+    // Fallback basé sur targetCalories si pas de distribution précise
+    const base = targetCalories
+    if (mealType === 'breakfast') return Math.round(base * 0.3)
+    if (mealType === 'lunch') return Math.round(base * 0.35)
+    if (mealType === 'dinner') return Math.round(base * 0.25)
+    return Math.round(base * 0.1) // snacks
+  }
+
+  const mealTargetCalories = getMealTarget()
+  const mealTargetProtein = Math.round((mealTargetCalories * 0.3) / 4)
+  const mealTargetCarbs = Math.round((mealTargetCalories * 0.4) / 4)
+  const mealTargetFat = Math.round((mealTargetCalories * 0.3) / 9)
+
   const remainingCalories = targetCalories - consumedCalories
   const progressPercentage = Math.min((consumedCalories / targetCalories) * 100, 100)
 
@@ -852,77 +872,169 @@ export function MealBuilder() {
           </div>
         </div>
       ) : (
-        <div className="bg-indigo-600 rounded-[2rem] p-6 text-white shadow-lg shadow-indigo-200 animate-in fade-in duration-500">
-          <div className="flex justify-between items-start mb-6">
+        <div 
+          data-no-swipe="true"
+          className="bg-indigo-600 rounded-[2rem] p-6 text-white shadow-lg shadow-indigo-200 animate-in fade-in duration-500 overflow-hidden relative"
+        >
+          <div className="flex justify-between items-center mb-8">
             <div className="flex items-center gap-2">
               <span className="text-orange-400">🔥</span>
-              <span className="text-xs font-bold uppercase tracking-wider opacity-80">Objectif TDEE</span>
+              <span className="text-xs font-bold uppercase tracking-wider opacity-80">
+                {viewMode === 'day' ? 'Objectif Journée' : `Objectif ${mealTypeLabels[mealType].label}`}
+              </span>
             </div>
-            <span className="bg-indigo-500/50 text-xs px-3 py-1 rounded-full backdrop-blur-sm">
-              {mealTypeLabels[mealType].label}
-            </span>
+            
+            {/* Widget Toggle Slider */}
+            <div className="bg-indigo-900/40 p-1 rounded-xl flex relative w-32 h-8">
+              <div 
+                className={`absolute top-1 bottom-1 bg-white rounded-lg transition-all duration-300 ease-out shadow-sm ${
+                  viewMode === 'day' ? 'left-1 w-[calc(50%-4px)]' : 'left-[calc(50%+2px)] w-[calc(50%-4px)]'
+                }`}
+              />
+              <button 
+                onClick={() => setViewMode('day')}
+                className={`flex-1 text-[10px] font-bold z-10 transition-colors duration-300 ${
+                  viewMode === 'day' ? 'text-indigo-600' : 'text-white/60'
+                }`}
+              >
+                JOUR
+              </button>
+              <button 
+                onClick={() => setViewMode('meal')}
+                className={`flex-1 text-[10px] font-bold z-10 transition-colors duration-300 ${
+                  viewMode === 'meal' ? 'text-indigo-600' : 'text-white/60'
+                }`}
+              >
+                REPAS
+              </button>
+            </div>
           </div>
 
-          <div className="flex justify-between items-end mb-6">
-            <div>
-              <div className="text-4xl font-bold">{targetCalories}</div>
-              <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Calories journalières</div>
-            </div>
-            <div className="text-right">
-              <div className="text-3xl font-bold">{mealTargetCalories}</div>
-              <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Cible par repas</div>
-            </div>
-          </div>
+          <div className="relative h-48">
+            {/* Mode Journée */}
+            <div className={`absolute inset-0 transition-all duration-500 transform ${
+              viewMode === 'day' ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0'
+            }`}>
+              <div className="mb-6">
+                <div className="text-4xl font-bold">{targetCalories}</div>
+                <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Calories journalières cibles</div>
+              </div>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider">
-                <span>{consumedCalories} kcal consommés</span>
-                <span>Reste: {remainingCalories} kcal</span>
-              </div>
-              <div className="h-2 bg-indigo-800/50 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-white rounded-full transition-all duration-500 ease-out"
-                  style={{ width: `${progressPercentage}%` }}
-                />
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider">
+                    <span>{Math.round(consumedCalories)} kcal consommés</span>
+                    <span>Reste: {Math.max(0, Math.round(remainingCalories))} kcal</span>
+                  </div>
+                  <div className="h-3 bg-indigo-900/40 rounded-full overflow-hidden p-[2px] border border-white/10">
+                    <div 
+                      className="h-full bg-white rounded-full transition-all duration-700 ease-out shadow-[0_0_12px_rgba(255,255,255,0.4)]"
+                      style={{ width: `${progressPercentage}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 pt-2">
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                      <span>Prot</span>
+                      <span>{Math.round(consumedProtein)}/{targetProtein}g</span>
+                    </div>
+                    <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-orange-400 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.min((consumedProtein / targetProtein) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                      <span>Glu</span>
+                      <span>{Math.round(consumedCarbs)}/{targetCarbs}g</span>
+                    </div>
+                    <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-400 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.min((consumedCarbs / targetCarbs) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                      <span>Lip</span>
+                      <span>{Math.round(consumedFat)}/{targetFat}g</span>
+                    </div>
+                    <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-emerald-400 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.min((consumedFat / targetFat) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 pt-2">
-              <div className="space-y-1">
-                <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
-                  <span>Protéines</span>
-                  <span>{Math.round(consumedProtein)}/{targetProtein}g</span>
-                </div>
-                <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-orange-400 rounded-full transition-all duration-500 ease-out"
-                    style={{ width: `${Math.min((consumedProtein / targetProtein) * 100, 100)}%` }}
-                  />
-                </div>
+            {/* Mode Repas */}
+            <div className={`absolute inset-0 transition-all duration-500 transform ${
+              viewMode === 'meal' ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
+            }`}>
+              <div className="mb-6">
+                <div className="text-4xl font-bold">{mealTargetCalories}</div>
+                <div className="text-[10px] opacity-70 uppercase font-bold tracking-tight">Cible pour ce repas</div>
               </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
-                  <span>Glucides</span>
-                  <span>{Math.round(consumedCarbs)}/{targetCarbs}g</span>
+
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-orange-300">
+                    <span>Ce repas: {Math.round(totalNutrients.calories)} kcal</span>
+                    <span>{Math.round((totalNutrients.calories / mealTargetCalories) * 100)}% de la cible</span>
+                  </div>
+                  <div className="h-3 bg-indigo-800/50 rounded-full overflow-hidden border border-indigo-400/30 p-[2px]">
+                    <div 
+                      className="h-full bg-gradient-to-r from-orange-400 to-amber-300 rounded-full transition-all duration-500 ease-out shadow-[0_0_8px_rgba(251,146,60,0.5)]"
+                      style={{ width: `${Math.min((totalNutrients.calories / mealTargetCalories) * 100, 100)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-blue-400 rounded-full transition-all duration-500 ease-out"
-                    style={{ width: `${Math.min((consumedCarbs / targetCarbs) * 100, 100)}%` }}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
-                  <span>Lipides</span>
-                  <span>{Math.round(consumedFat)}/{targetFat}g</span>
-                </div>
-                <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-emerald-400 rounded-full transition-all duration-500 ease-out"
-                    style={{ width: `${Math.min((consumedFat / targetFat) * 100, 100)}%` }}
-                  />
+
+                <div className="grid grid-cols-3 gap-4 pt-2">
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                      <span>Prot</span>
+                      <span>{Math.round(totalNutrients.protein)}/{mealTargetProtein}g</span>
+                    </div>
+                    <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-orange-400 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.min((totalNutrients.protein / mealTargetProtein) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                      <span>Glu</span>
+                      <span>{Math.round(totalNutrients.carbs)}/{mealTargetCarbs}g</span>
+                    </div>
+                    <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-400 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.min((totalNutrients.carbs / mealTargetCarbs) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[8px] font-bold uppercase opacity-80">
+                      <span>Lip</span>
+                      <span>{Math.round(totalNutrients.fat)}/{mealTargetFat}g</span>
+                    </div>
+                    <div className="h-1 bg-indigo-800/50 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-emerald-400 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.min((totalNutrients.fat / mealTargetFat) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

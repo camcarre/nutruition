@@ -24,7 +24,8 @@ export function LoginForm() {
         localStorage.setItem('user', JSON.stringify({ 
           id: user.id,
           email: user.email,
-          photoUrl: user.photoUrl 
+          photoUrl: user.photoUrl,
+          targetCalories: user.targetCalories
         }))
         window.dispatchEvent(new Event('nutruition:user'))
         showIsland(`Bon retour !`, 'success', 3000)

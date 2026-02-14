@@ -6,7 +6,7 @@ export type User = {
   id?: string
   email?: string
   photoUrl?: string
-  dailyCalories?: number
+  targetCalories?: number
 } | null
 
 let lastRaw: string | null = null
@@ -48,7 +48,7 @@ export function getUserSnapshot() {
         id: lastParsed.id,
         email: lastParsed.email || '',
         photoUrl: lastParsed.photoUrl,
-        dailyCalories: lastParsed.dailyCalories,
+        targetCalories: lastParsed.targetCalories,
         synced: true
       }).catch(console.error)
     }
@@ -69,7 +69,7 @@ export function updateUserLocal(user: User) {
         id: user.id,
         email: user.email || '',
         photoUrl: user.photoUrl,
-        dailyCalories: user.dailyCalories,
+        targetCalories: user.targetCalories,
         synced: true
       }).catch(console.error)
     }

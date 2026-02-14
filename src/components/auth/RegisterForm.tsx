@@ -33,7 +33,8 @@ export function RegisterForm() {
         localStorage.setItem('user', JSON.stringify({ 
           id: user.id,
           email: user.email,
-          photoUrl: user.photoUrl 
+          photoUrl: user.photoUrl,
+          targetCalories: user.targetCalories
         }))
         window.dispatchEvent(new Event('nutruition:user'))
         showIsland('Compte créé !', 'success', 3000)

@@ -113,7 +113,7 @@ export function Calendar() {
     fat: acc.fat + meal.totalFat
   }), { calories: 0, protein: 0, carbs: 0, fat: 0 })
 
-  const targetCalories = tdeeResult ? tdeeResult.targetCalories : 2000
+  const targetCalories = user?.targetCalories ?? (tdeeResult ? tdeeResult.targetCalories : 2000)
   const targetProtein = tdeeResult ? (targetCalories * 0.3 / 4) : 150
   const targetCarbs = tdeeResult ? (targetCalories * 0.4 / 4) : 250
   const targetFat = tdeeResult ? (targetCalories * 0.3 / 9) : 65
