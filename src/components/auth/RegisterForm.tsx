@@ -30,15 +30,18 @@ export function RegisterForm() {
     try {
       const user = await getOrCreateUser(formData.email)
       if (user) {
-        localStorage.setItem('user', JSON.stringify({ 
+        const userToSave = { 
           id: user.id,
           email: user.email,
           photoUrl: user.photoUrl,
           targetCalories: user.targetCalories
-        }))
+        }
+        localStorage.setItem('user', JSON.stringify(userToSave))
         window.dispatchEvent(new Event('nutruition:user'))
         showIsland('Compte créé !', 'success', 3000)
-        router.push('/')
+        
+        // Force immediate redirection
+        router.replace('/')
       }
     } catch (error) {
       console.error('Registration error:', error)
@@ -57,74 +60,81 @@ export function RegisterForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm">
-          {error}
+    <div className="bg-white p-8 rounded-[2rem] shadow-xl shadow-indigo-100 border border-indigo-50">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {error && (
+          <div className="bg-red-50 border border-red-100 text-red-600 px-4 py-3 rounded-2xl text-xs font-bold animate-in fade-in slide-in-from-top-2">
+            {error}
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="email" className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">
+            Email
+          </label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            required
+            value={formData.email}
+            onChange={handleChange}
+            className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-gray-900"
+            placeholder="votre@email.com"
+          />
         </div>
-      )}
 
-      <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-          Email
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          required
-          value={formData.email}
-          onChange={handleChange}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-          placeholder="votre@email.com"
-        />
-      </div>
+        <div>
+          <label htmlFor="password" className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">
+            Mot de passe
+          </label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            required
+            value={formData.password}
+            onChange={handleChange}
+            className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-gray-900"
+            placeholder="••••••••"
+          />
+        </div>
 
-      <div>
-        <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-          Mot de passe
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          required
-          value={formData.password}
-          onChange={handleChange}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-          placeholder="••••••••"
-        />
-      </div>
+        <div>
+          <label htmlFor="confirmPassword" className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">
+            Confirmer le mot de passe
+          </label>
+          <input
+            id="confirmPassword"
+            name="confirmPassword"
+            type="password"
+            required
+            value={formData.confirmPassword}
+            onChange={handleChange}
+            className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-gray-900"
+            placeholder="••••••••"
+          />
+        </div>
 
-      <div>
-        <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-          Confirmer le mot de passe
-        </label>
-        <input
-          id="confirmPassword"
-          name="confirmPassword"
-          type="password"
-          required
-          value={formData.confirmPassword}
-          onChange={handleChange}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-          placeholder="••••••••"
-        />
-      </div>
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="w-full bg-[#1a1c2e] text-white py-4 px-6 rounded-2xl font-bold hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-100 active:scale-[0.98]"
+        >
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <span>Inscription...</span>
+            </div>
+          ) : "S'inscrire"}
+        </button>
 
-      <button
-        type="submit"
-        disabled={isLoading}
-        className="w-full bg-primary-600 text-gray-900 py-3 px-4 rounded-md font-medium hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-      >
-        {isLoading ? 'Inscription...' : "S'inscrire"}
-      </button>
-
-      <div className="text-center">
-        <Link href="/login" className="text-sm text-primary-600 hover:text-primary-700">
-          Déjà un compte ? Se connecter
-        </Link>
-      </div>
-    </form>
+        <div className="text-center pt-2">
+          <Link href="/login" className="text-sm font-bold text-indigo-600 hover:text-indigo-700 transition-colors">
+            Déjà un compte ? <span className="underline decoration-indigo-200 underline-offset-4">Se connecter</span>
+          </Link>
+        </div>
+      </form>
+    </div>
   )
 }

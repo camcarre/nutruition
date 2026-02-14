@@ -130,6 +130,7 @@ export function MealBuilder() {
    const [isAISearching, setIsAISearching] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [recognition, setRecognition] = useState<any>(null)
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
 
   useEffect(() => {
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
@@ -1248,13 +1249,16 @@ export function MealBuilder() {
 
       {/* Food Search Modal */}
       {showFoodSearch && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end">
-          <div className="w-full bg-white rounded-t-[2.5rem] p-6 shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
-            <div className="w-12 h-1.5 bg-gray-100 rounded-full mx-auto mb-6" />
-            <div className="flex justify-between items-center mb-6">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end transition-all duration-300">
+          <div className={`w-full bg-white rounded-t-[2.5rem] p-6 shadow-2xl ${isSearchFocused ? 'h-[95vh]' : 'max-h-[85vh]'} overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300 transition-all`}>
+            <div className="w-12 h-1.5 bg-gray-100 rounded-full mx-auto mb-6 shrink-0" />
+            <div className="flex justify-between items-center mb-6 shrink-0">
               <h3 className="text-xl font-bold text-gray-900">Ajouter un aliment</h3>
               <button
-                onClick={() => setShowFoodSearch(false)}
+                onClick={() => {
+                  setShowFoodSearch(false)
+                  setIsSearchFocused(false)
+                }}
                 className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-50 text-gray-400"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1263,7 +1267,7 @@ export function MealBuilder() {
               </button>
             </div>
             
-            <div className="relative mb-6">
+            <div className="relative mb-6 shrink-0">
               <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1273,6 +1277,8 @@ export function MealBuilder() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
                 placeholder="Rechercher un aliment..."
                 className="w-full pl-12 pr-14 py-4 bg-gray-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                 autoFocus

@@ -69,6 +69,8 @@ export function FoodList() {
     { id: '8', name: 'Banane', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, servingSizeG: 100, category: 'Fruits' },
   ]
 
+  const [isInputFocused, setIsInputFocused] = useState(false)
+
   // Fusionner les aliments de la BDD avec les aliments par défaut (sans doublons par nom)
   const displayFoods = [
     ...foods,
@@ -252,6 +254,14 @@ export function FoodList() {
     return matchesSearch && matchesCategory && matchesTab && matchesFavoritesToggle
   })
 
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    setIsInputFocused(true)
+    // Scroll the input to the top of the viewport
+    setTimeout(() => {
+      e.target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 300)
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -261,41 +271,56 @@ export function FoodList() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Search Bar */}
-      <div className="relative group">
-        <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+    <div className={`space-y-6 transition-all duration-300 ${isInputFocused ? 'pb-80' : ''}`}>
+      {/* Page Title - Hidden when searching to save space */}
+      {!isInputFocused && (
+        <div className="mb-2 animate-in fade-in duration-300">
+          <h2 className="text-3xl font-black text-[#1a1c2e] tracking-tighter mb-1">Aliments</h2>
+          <p className="text-gray-400 text-sm font-medium">Explorez la base de données</p>
         </div>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Rechercher un aliment..."
-          className="w-full pl-12 pr-14 py-4 bg-white border border-gray-50 rounded-[1.5rem] shadow-sm text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder:text-gray-300 transition-all"
-        />
-        
-        {/* Gemini AI Button in Search Bar */}
-        {searchQuery && (
-          <button
-            onClick={handleAISearch}
-            disabled={isAISearching}
-            className={`absolute right-2 inset-y-2 px-3 rounded-xl flex items-center justify-center transition-all ${
-              isAISearching 
-                ? 'bg-blue-50 text-blue-300' 
-                : 'bg-blue-50 text-blue-600 hover:bg-blue-100 active:scale-95'
-            }`}
-            title="Rechercher avec Gemini AI"
-          >
-            {isAISearching ? (
-              <div className="w-5 h-5 border-2 border-blue-200 border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <span className="text-xl">✨</span>
-            )}
-          </button>
-        )}
+      )}
+
+      {/* Search Bar */}
+      <div className={`sticky top-2 z-30 transition-all duration-300 ${isInputFocused ? '-mx-4 px-4 pt-2 pb-4 bg-white/95 backdrop-blur-sm shadow-md rounded-b-[2rem]' : ''}`}>
+        <div className="relative group" data-no-swipe="true">
+          <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={handleFocus}
+            onBlur={() => {
+              // Delay to allow clicking results/buttons
+              setTimeout(() => setIsInputFocused(false), 200)
+            }}
+            placeholder="Rechercher un aliment..."
+            className="w-full pl-12 pr-14 py-4 bg-white border border-gray-100 rounded-[1.5rem] shadow-sm text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder:text-gray-300 transition-all"
+          />
+          
+          {/* Gemini AI Button in Search Bar */}
+          {searchQuery && (
+            <button
+              onClick={handleAISearch}
+              disabled={isAISearching}
+              className={`absolute right-2 inset-y-2 px-3 rounded-xl flex items-center justify-center transition-all ${
+                isAISearching 
+                  ? 'bg-blue-50 text-blue-300' 
+                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100 active:scale-95'
+              }`}
+              title="Rechercher avec Gemini AI"
+            >
+              {isAISearching ? (
+                <div className="w-5 h-5 border-2 border-blue-200 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <span className="text-xl">✨</span>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Categories */}
